@@ -1,0 +1,18 @@
+# Terraform state — contains real secrets (API keys, passwords) in plain text
+infra/*.tfstate
+infra/*.tfstate.*
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/*.tfvars
+infra/payload.json
+infra/response.json
+infra/.testtoken
+
+# Built/zipped artifacts
+lambda/handler.zip
+client/node_modules
+client/dist
+
+# OS/editor noise
+.DS_Store
+*.log
