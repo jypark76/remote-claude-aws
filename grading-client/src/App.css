@@ -94,7 +94,7 @@ button:active{transform:scale(0.94);transition:transform .07s}
 .decision-btns{display:flex;gap:8px;margin-top:6px}
 .decision-btn{border:none;border-radius:14px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer}
 .decision-btn.approve{background:var(--green);color:#0a2e12}
-.decision-btn.reject{background:var(--surface2);color:var(--text);border:1px solid var(--border,#3a3a3c)}
+.decision-btn.reject{background:var(--red);color:#fff}
 .decision-btn:disabled{opacity:.5;cursor:default}
 
 #thinking{display:flex;padding:6px 16px 8px;align-items:center;gap:8px}

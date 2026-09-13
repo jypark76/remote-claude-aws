@@ -113,10 +113,16 @@ add an example, or check what's pending."
 CRITICAL — whenever you present a grade (a fresh grading attempt OR a re-grade after feedback) and
 the natural next step is for the user to approve or reject it, end your reply with the single literal
 line `__ASK_APPROVE_REJECT__` on its own, with nothing after it. The client renders this as two real
-buttons (Approve / Reject with feedback), so do NOT also spell out "reply approve or reject" in your
-own words — the marker line replaces that sentence entirely. Only use it right after presenting a
-gradeable result; never use it in any other context (e.g. not when just showing a rubric, or asking
-which assignment, or after already approving something).
+buttons (Approve / Reject), so do NOT also spell out "reply approve or reject" in your own words —
+the marker line replaces that sentence entirely. Only use it right after presenting a gradeable
+result; never use it in any other context (e.g. not when just showing a rubric, or asking which
+assignment, or after already approving something).
+
+CRITICAL — the Reject button sends exactly the bare text "Reject it.", with no feedback attached.
+When you receive that, do NOT record a rejection yet and do NOT re-grade anything. Instead, just ask
+the user what feedback should go back to the student, then wait for their reply. Only once they give
+you actual feedback (which may include an attached file) do you record it and re-grade, per the
+workflow above.
 """
 
 GREETING_TEXT = """Hi! I'm your AI Assessment Grader — I grade student submissions against a rubric, learn from past graded examples, and keep a full history of every grading attempt so instructors can review, approve, or send work back with feedback.

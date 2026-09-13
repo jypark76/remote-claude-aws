@@ -321,7 +321,7 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
           )}
           <button className="text-btn" onClick={onLogout} title="Logout">Logout</button>
           <button className="new-btn round" onClick={newIncognito} title="Incognito chat">&#128123;</button>
-          <button className="new-btn round" onClick={onOpenTables} title="Browse database tables">&#128451;&#65039;</button>
+          <button className="new-btn round" onClick={onOpenTables} title="Browse database tables">&#128452;&#65039;</button>
           <button className="new-btn round" onClick={newChat} title="New chat">+</button>
         </div>
       </div>
@@ -883,9 +883,7 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
   }
 
   function handleReject() {
-    const feedback = window.prompt("What feedback should go back for a re-grade?");
-    if (feedback === null) return;
-    sendChatText("Reject it. Feedback: " + feedback);
+    sendChatText("Reject it.");
   }
 
   async function stopRun() {
@@ -1061,8 +1059,8 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
                 </div>
                 {m.askApproveReject && (
                   <div className="decision-btns">
-                    <button className="decision-btn approve" onClick={handleApprove} disabled={thinking}>&#9989; Approve</button>
-                    <button className="decision-btn reject" onClick={handleReject} disabled={thinking}>&#9997;&#65039; Reject with feedback</button>
+                    <button className="decision-btn approve" onClick={handleApprove} disabled={thinking}>Approve</button>
+                    <button className="decision-btn reject" onClick={handleReject} disabled={thinking}>Reject</button>
                   </div>
                 )}
               </>
