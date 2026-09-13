@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Grading workflow</title>
+<style>
+  body { margin: 0; padding: 24px; background: #f7f7f5; font-family: -apple-system, sans-serif; }
+  .t { font-size: 14px; fill: #1a1a1a; }
+  .th { font-size: 14px; font-weight: 500; fill: #1a1a1a; }
+  .ts { font-size: 12px; fill: #5a5a5a; }
+  .box { fill: #ffffff; stroke: #b0b0b0; }
+  .arr { stroke: #767676; stroke-width: 1.5; fill: none; }
+  .c-gray rect { fill: #F1EFE8; stroke: #888780; }
+  .c-purple rect { fill: #EEEDFE; stroke: #7F77DD; }
+  .c-blue rect { fill: #E6F1FB; stroke: #378ADD; }
+  .c-amber rect { fill: #FAEEDA; stroke: #BA7517; }
+  .c-teal rect { fill: #E1F5EE; stroke: #1D9E75; }
+  .c-gray text, .c-purple text, .c-blue text, .c-amber text, .c-teal text { fill: #2C2C2A; }
+</style>
+</head>
+<body>
+<svg width="100%" viewBox="0 0 680 560" style="max-width:680px;display:block;margin:0 auto" role="img">
+<title>Submission grading workflow with revision loop</title>
+<desc>A student submission is uploaded, the AI grades it as a new attempt, the result is shown to the instructor in chat. If approved, it's copied into the graded_examples bank. If not, the instructor leaves a comment explaining why, and the AI grades it again as a new attempt, incorporating that feedback, looping until approved.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+
+<line x1="340" y1="90" x2="340" y2="130" class="arr" marker-end="url(#arrow)"/>
+<line x1="340" y1="180" x2="340" y2="220" class="arr" marker-end="url(#arrow)"/>
+<line x1="340" y1="270" x2="340" y2="310" class="arr" marker-end="url(#arrow)"/>
+<line x1="340" y1="360" x2="500" y2="400" class="arr" marker-end="url(#arrow)"/>
+<line x1="340" y1="360" x2="160" y2="400" class="arr" marker-end="url(#arrow)"/>
+<text x="440" y="378" text-anchor="middle" class="ts">Yes</text>
+<text x="240" y="378" text-anchor="middle" class="ts">No</text>
+<path d="M 50 432 C -30 432 -30 155 230 155" fill="none" class="arr" marker-end="url(#arrow)"/>
+
+<g class="c-gray">
+  <rect x="230" y="40" width="220" height="50" rx="4"/>
+  <text x="340" y="60" text-anchor="middle" class="th">Submission uploaded</text>
+  <text x="340" y="77" text-anchor="middle" class="ts">&#8594; submissions</text>
+</g>
+
+<g class="c-purple">
+  <rect x="230" y="130" width="220" height="50" rx="4"/>
+  <text x="340" y="150" text-anchor="middle" class="th">AI grades it</text>
+  <text x="340" y="167" text-anchor="middle" class="ts">&#8594; grading_attempts</text>
+</g>
+
+<g class="c-blue">
+  <rect x="230" y="220" width="220" height="50" rx="4"/>
+  <text x="340" y="240" text-anchor="middle" class="th">Shown to instructor</text>
+  <text x="340" y="257" text-anchor="middle" class="ts">no database write</text>
+</g>
+
+<g class="c-amber">
+  <rect x="230" y="310" width="220" height="50" rx="4"/>
+  <text x="340" y="330" text-anchor="middle" class="th">Instructor approves?</text>
+  <text x="340" y="347" text-anchor="middle" class="ts">no write yet</text>
+</g>
+
+<g class="c-teal">
+  <rect x="390" y="400" width="220" height="64" rx="4"/>
+  <text x="500" y="420" text-anchor="middle" class="th">Copied to bank</text>
+  <text x="500" y="437" text-anchor="middle" class="ts">&#8594; graded_examples</text>
+  <text x="500" y="452" text-anchor="middle" class="ts">&#8594; submissions.status</text>
+</g>
+
+<g class="c-gray">
+  <rect x="50" y="400" width="220" height="64" rx="4"/>
+  <text x="160" y="420" text-anchor="middle" class="th">Instructor comments why</text>
+  <text x="160" y="437" text-anchor="middle" class="ts">&#8594; grading_attempts</text>
+  <text x="160" y="452" text-anchor="middle" class="ts">(instructor_feedback)</text>
+</g>
+
+<text x="340" y="500" text-anchor="middle" class="ts">Loop repeats until the instructor approves</text>
+<text x="340" y="518" text-anchor="middle" class="ts">&#8594; table = this step writes to that table</text>
+</svg>
+</body>
+</html>

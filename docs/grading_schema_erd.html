@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Grading schema ERD</title>
+<style>
+  body { margin: 0; padding: 24px; background: #f7f7f5; font-family: -apple-system, sans-serif; }
+</style>
+</head>
+<body>
+<div style="position:relative;width:100%;max-width:800px;height:780px;margin:0 auto;font-size:13px">
+
+<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none" viewBox="0 0 800 780" preserveAspectRatio="none">
+  <path d="M 245 55 C 195 55 195 291 240 291" fill="none" stroke="#b0b0b0" stroke-width="1.5"/>
+  <path d="M 495 55 C 545 55 545 291 465 291" fill="none" stroke="#b0b0b0" stroke-width="1.5"/>
+  <path d="M 710 255 C 760 255 760 515 745 515" fill="none" stroke="#b0b0b0" stroke-width="1.5"/>
+</svg>
+
+<div style="position:absolute;left:245px;top:10px;width:250px;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;background:#ffffff">
+  <div style="background:#185FA5;color:#fff;font-weight:500;padding:8px 12px">assignments</div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">assignment_id</span><span style="color:#767676">uuid</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">instructor_username</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">title</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">rubric</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px"><span style="color:#1a1a1a">created_at</span><span style="color:#767676">timestamp</span></div>
+</div>
+
+<div style="position:absolute;left:10px;top:210px;width:230px;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;background:#ffffff">
+  <div style="background:#185FA5;color:#fff;font-weight:500;padding:8px 12px">graded_examples</div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">example_id</span><span style="color:#767676">uuid</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">assignment_id</span><span style="color:#767676">uuid</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">student_work</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">grade</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">reasoning</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px"><span style="color:#1a1a1a">created_at</span><span style="color:#767676">timestamp</span></div>
+</div>
+
+<div style="position:absolute;left:460px;top:210px;width:250px;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;background:#ffffff">
+  <div style="background:#185FA5;color:#fff;font-weight:500;padding:8px 12px">submissions</div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">submission_id</span><span style="color:#767676">uuid</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">assignment_id</span><span style="color:#767676">uuid</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">student_name</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">submission_text</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">status</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px"><span style="color:#1a1a1a">created_at</span><span style="color:#767676">timestamp</span></div>
+</div>
+
+<div style="position:absolute;left:460px;top:470px;width:280px;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;background:#ffffff">
+  <div style="background:#185FA5;color:#fff;font-weight:500;padding:8px 12px">grading_attempts</div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">attempt_id</span><span style="color:#767676">uuid</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">submission_id</span><span style="color:#767676">uuid</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">attempt_number</span><span style="color:#767676">int</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">ai_grade</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">ai_reasoning</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">instructor_feedback</span><span style="color:#767676">text</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #e0e0e0"><span style="color:#1a1a1a">approved</span><span style="color:#767676">boolean</span></div>
+  <div style="display:flex;justify-content:space-between;padding:6px 12px"><span style="color:#1a1a1a">created_at</span><span style="color:#767676">timestamp</span></div>
+</div>
+
+</div>
+</body>
+</html>

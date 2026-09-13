@@ -8,10 +8,21 @@ infra/payload.json
 infra/response.json
 infra/.testtoken
 
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/.terraform/
+terraform/*.tfvars
+
 # Built/zipped artifacts
 lambda/handler.zip
 client/node_modules
 client/dist
+
+# Real personal data used for testing — never commit
+test-data/
+
+# Contains the real Claude API key — never commit
+ec2-server/set_key.sh
 
 # OS/editor noise
 .DS_Store
