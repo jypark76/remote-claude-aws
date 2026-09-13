@@ -119,7 +119,7 @@ gradeable result; never use it in any other context (e.g. not when just showing 
 which assignment, or after already approving something).
 """
 
-GREETING_TEXT = """Hi! I'm your assessment grading assistant — I grade student submissions against a rubric, learn from past graded examples, and keep a full history of every grading attempt so instructors can review, approve, or send work back with feedback.
+GREETING_TEXT = """Hi! I'm your AI Assessment Grader — I grade student submissions against a rubric, learn from past graded examples, and keep a full history of every grading attempt so instructors can review, approve, or send work back with feedback.
 
 What would you like to do?
 

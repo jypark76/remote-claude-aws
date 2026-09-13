@@ -146,6 +146,7 @@ function LoginScreen({ onLogin }) {
   return (
     <form onSubmit={handleSubmit} className="login-screen">
       <img src={`${API_BASE}/avatars/wgu-owl.webp`} alt="remote_claude" className="login-logo" />
+      <h1 className="login-title">AI Assessment Grader</h1>
       <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoCapitalize="none" />
       <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="Password" />
       <button type="submit">Sign In</button>
@@ -306,7 +307,6 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     <div id="list-screen">
       <div id="list-header">
         <h1>
-          remote_claude{" "}
           <button className="icon-btn-sm" onClick={load} title="Refresh">&#8635;</button>
           <button className="icon-btn-sm" onClick={() => setMenuOpen((v) => !v)} title="Sort & Search">
             <span className={"menu-arrow" + (menuOpen ? " open" : "")}>&#9660;</span>
@@ -855,11 +855,12 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
       files.forEach((f) => fd.append("file", f));
       if (text) fd.append("message", text);
       try {
-        await fetch(`${API_BASE}/api/chats/${chatId}/upload`, {
+        const res = await fetch(`${API_BASE}/api/chats/${chatId}/upload`, {
           method: "POST",
           headers: { Authorization: token },
           body: fd,
         });
+        if (!res.ok) throw new Error(`upload failed: ${res.status}`);
       } catch {
         addBubble("claude", "Upload failed.", Date.now());
         stopThinking();
@@ -1029,9 +1030,15 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
                   {m.text}
                   {m.files && m.files.length > 0 && (
                     <div className="bubble-files">
-                      {m.files.map((f, i) => (
-                        <div key={i} className="file-attach-sent">{fileIcon(f.filename || f)} {f.filename || f}</div>
-                      ))}
+                      {m.files.map((f, i) => {
+                        const name = f.filename || f;
+                        return (
+                          <a key={i} className="file-attach-sent"
+                            href={`${API_BASE}/api/chats/${chatId}/files/${encodeURIComponent(name)}?token=${encodeURIComponent(token)}`}>
+                            {fileIcon(name)} {name}
+                          </a>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1126,7 +1133,8 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
               onClick={() => (thinking ? stopRun() : doSend())}>
               {thinking ? "■" : "↑"}
             </button>
-            <input ref={fileInputRef} type="file" multiple style={{ display: "none" }}
+            <input ref={fileInputRef} type="file" accept="*/*" multiple
+              style={{ display: "none" }}
               onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
           </div>
         </div>

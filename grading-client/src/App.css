@@ -85,7 +85,7 @@ button:active{transform:scale(0.94);transition:transform .07s}
 .bubble-wrap.me .bubble{background:var(--bubble-me);color:#fff;border-bottom-right-radius:4px}
 .bubble-wrap.them .bubble{background:var(--bubble-them);color:var(--text);border-bottom-left-radius:4px;font-family:'Menlo',monospace;font-size:12.5px}
 .bubble-files{display:flex;flex-direction:column;gap:4px;margin-top:6px}
-.file-attach-sent{display:inline-flex;align-items:center;gap:6px;background:#0a5a8a;border-radius:10px;padding:6px 10px;font-size:12px;color:#fff}
+.file-attach-sent{display:inline-flex;align-items:center;gap:6px;background:#0a5a8a;border-radius:10px;padding:6px 10px;font-size:12px;color:#fff;text-decoration:none}
 .file-bubble{background:var(--surface2);border-radius:12px;padding:8px 12px;font-size:13px;color:var(--sub);max-width:100%}
 .file-bubble a{color:var(--accent);text-decoration:none;display:block;padding:2px 0}
 .bubble-meta{display:flex;align-items:center;gap:8px;margin-top:2px}
