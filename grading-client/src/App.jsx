@@ -269,6 +269,7 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
   }
 
   function sortChats(list) {
+    if (sortField === "custom") return list;
     const sorted = [...list].sort((a, b) => {
       let av, bv;
       if (sortField === "created") { av = a.createdAt || 0; bv = b.createdAt || 0; }
@@ -298,6 +299,7 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     ids.splice(to, 0, ids.splice(from, 1)[0]);
     const reordered = ids.map((id) => chats.find((c) => c.id === id)).filter(Boolean);
     setChats(reordered);
+    setSortField("custom");
     api("/api/chat-order", token, { method: "PATCH", body: JSON.stringify({ ids }) }).catch(() => {});
     dragSrc.current = null;
     setDragOverId(null);
@@ -312,6 +314,7 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     ids.unshift(id);
     const reordered = ids.map((cid) => chats.find((c) => c.id === cid)).filter(Boolean);
     setChats(reordered);
+    setSortField("custom");
     api("/api/chat-order", token, { method: "PATCH", body: JSON.stringify({ ids }) }).catch(() => {});
   }
 
@@ -365,6 +368,7 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
             <option value="name">Name</option>
             <option value="owner">Owner</option>
             <option value="thinking">Thinking</option>
+            <option value="custom">Manual</option>
           </select>
           <button id="sort-dir" onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}>
             {sortDir === "asc" ? "↑" : "↓"}
