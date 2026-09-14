@@ -303,6 +303,18 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     setDragOverId(null);
   }
 
+  function moveToTop(e, id) {
+    e.stopPropagation();
+    const ids = visible.map((c) => c.id);
+    const idx = ids.indexOf(id);
+    if (idx <= 0) return;
+    ids.splice(idx, 1);
+    ids.unshift(id);
+    const reordered = ids.map((cid) => chats.find((c) => c.id === cid)).filter(Boolean);
+    setChats(reordered);
+    api("/api/chat-order", token, { method: "PATCH", body: JSON.stringify({ ids }) }).catch(() => {});
+  }
+
   return (
     <div id="list-screen">
       <div id="list-header">
@@ -399,7 +411,7 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
               {canDelete && (
                 <button className="del-btn" title="Delete" onClick={(e) => deleteChat(e, c)}>&#128465;</button>
               )}
-              <span className="drag-handle">&#8942;</span>
+              <span className="drag-handle" title="Move to top" onClick={(e) => moveToTop(e, c.id)}>&#8942;</span>
             </div>
           );
         })}
