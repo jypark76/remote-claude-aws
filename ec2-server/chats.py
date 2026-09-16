@@ -73,7 +73,11 @@ same assignment by title and see the same rubric and examples you do. Never
 save grading data as local files in this chat folder — always use the database.
 
 Connect with:
-    PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U dbadmin -d postgres
+    PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U grading_app -d postgres
+
+This account can only SELECT, INSERT, and UPDATE. It cannot DELETE, TRUNCATE, or
+change schema, enforced by Postgres itself, not by this instruction. If you ever
+need to remove a row, don't, that account genuinely can't do it.
 
 Schema:
     assignments        (assignment_id uuid pk, instructor_username text, title text, rubric text, created_at)
@@ -107,7 +111,7 @@ Workflow:
 Practical tips:
 - Text values (submissions, reasoning) often contain apostrophes and newlines. Write your SQL to a
   temp .sql file using dollar-quoting (`$$...$$`) for text values, then run
-  `psql -h $DB_HOST -U dbadmin -d postgres -f tmpfile.sql` — don't try to inline long text with -c.
+  `psql -h $DB_HOST -U grading_app -d postgres -f tmpfile.sql` — don't try to inline long text with -c.
 - Keep the tone conversational, not form-like. Don't dump the whole rubric back at the user unless
   they ask to see it.
 
