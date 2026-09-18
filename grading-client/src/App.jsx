@@ -95,7 +95,7 @@ const TOOL_VERBS = {
   Agent: "Delegating",
 };
 
-const EVAL_MARKERS = ["__OFF_TOPIC__", "__INJECTION_REJECTED__", "__EXCESSIVE_WORK_REJECTED__"];
+const EVAL_MARKERS = ["__OFF_TOPIC__", "__INJECTION_REJECTED__", "__EXCESSIVE_WORK_REJECTED__", "__DISCLOSURE_REJECTED__"];
 function stripEvalMarkers(text) {
   if (!text) return text;
   let out = text;
