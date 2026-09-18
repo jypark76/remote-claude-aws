@@ -28,3 +28,4 @@ ec2-server/set_key.sh
 .DS_Store
 *.log
 eval/eval_owasp.py
+__pycache__/
