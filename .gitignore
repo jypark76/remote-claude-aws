@@ -27,5 +27,8 @@ ec2-server/set_key.sh
 # OS/editor noise
 .DS_Store
 *.log
-eval/eval_owasp.py
 __pycache__/
+
+# Local secrets - never commit, read at runtime by scripts that need them
+.env
+*.env
