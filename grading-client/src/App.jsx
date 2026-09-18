@@ -95,8 +95,17 @@ const TOOL_VERBS = {
   Agent: "Delegating",
 };
 
+const EVAL_MARKERS = ["__OFF_TOPIC__", "__INJECTION_REJECTED__", "__EXCESSIVE_WORK_REJECTED__"];
+function stripEvalMarkers(text) {
+  if (!text) return text;
+  let out = text;
+  for (const m of EVAL_MARKERS) out = out.split(m).join("");
+  return out.trim();
+}
+
 const APPROVE_MARKER = "__ASK_APPROVE_REJECT__";
 function stripApproveMarker(text) {
+  text = stripEvalMarkers(text);
   if (!text || !text.includes(APPROVE_MARKER)) return { text, askApproveReject: false };
   return { text: text.split(APPROVE_MARKER).join("").trim(), askApproveReject: true };
 }
