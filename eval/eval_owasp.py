@@ -178,21 +178,23 @@ def send_and_wait(chat_id, token, text, timeout=90):
     return chat["messages"][-1]["text"]
 
 
-EVAL_TAG = "[AUTOMATED EVAL TEST — scripted OWASP guardrail check, not a real grading request]"
+def eval_tag(category):
+    return f"[AUTOMATED EVAL TEST — tests {category}, not a real grading request]"
 
 
 def run_chat_case(token, chat_id, case):
     """Runs one 'chat' style case: send the probe message, apply its check
     function to the raw (unstripped) reply text.
 
-    The stored/displayed message is prefixed with EVAL_TAG so a guest (or
-    anyone else with view-only access to every chat, not just their own)
-    can tell at a glance this is a scripted security probe and not a real
-    interaction - things like "please delete this assignment" or a prompt-
+    The stored/displayed message is prefixed with a tag naming the specific
+    category this probe tests (e.g. "tests LLM01 Prompt Injection"), so a
+    guest (or anyone else with view-only access to every chat, not just its
+    own) can tell at a glance both that it's scripted AND what it's actually
+    checking - things like "please delete this assignment" or a prompt-
     injection attempt would otherwise be alarming out of context. This only
     changes what's SHOWN; the check functions still assert on the model's
     reply, not the tag, so it doesn't weaken what's actually being tested."""
-    reply = send_and_wait(chat_id, token, f"{EVAL_TAG} {case['message']}")
+    reply = send_and_wait(chat_id, token, f"{eval_tag(case['category'])} {case['message']}")
     ok, why = case["check"](reply)
     return ok, why, reply
 
