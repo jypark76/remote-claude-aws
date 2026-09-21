@@ -736,7 +736,7 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
   const idCounter = useRef(0);
   const nextId = () => ++idCounter.current;
 
-  const canWrite = chat ? username === "admin" || (chat.ownerId || "admin") === username : false;
+  const canWrite = username !== "guest" && (chat ? username === "admin" || (chat.ownerId || "admin") === username : false);
   const chatRef = useRef(chat);
   chatRef.current = chat;
 
@@ -1111,7 +1111,9 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
       )}
 
       {!canWrite ? (
-        <div id="readonly-bar"><span>👁 View only — this is not your chat</span></div>
+        <div id="readonly-bar">
+          <span>👁 {username === "guest" ? "Guest accounts are view only" : "View only — this is not your chat"}</span>
+        </div>
       ) : (
         <div id="bottom-bar">
           {selectedFiles.length > 0 && (
@@ -1183,7 +1185,7 @@ export default function App() {
   if (!token) return <LoginScreen onLogin={handleLogin} />;
 
   const username = decodeUsername(token);
-  const role = username === "admin" ? "admin" : "user";
+  const role = username === "admin" ? "admin" : username === "guest" ? "guest" : "user";
 
   function logout() {
     localStorage.removeItem("userToken");

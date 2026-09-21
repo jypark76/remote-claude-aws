@@ -770,12 +770,16 @@ def init_chats(app):
             if not claims:
                 return
             username = username_from_claims(claims)
+            if role_for(claims) == "guest":
+                client.send({"type": "error", "chatId": msg.get("chatId") or client.chat_id,
+                             "message": "Guest accounts can view chats but can't send messages."})
+                return
             chat_id = msg.get("chatId") or client.chat_id
             text = (msg.get("data") or "").rstrip("\n")
             chat = load_chat_by_id(chat_id)
             if chat:
                 owner = resolve_owner(chat)
-                if role_for(username) != "admin" and owner != username:
+                if role_for(claims) != "admin" and owner != username:
                     return
                 append_message(chat, "user", text)
             run_claude_message(chat_id, text)
@@ -987,6 +991,8 @@ def init_chats(app):
     @app.post("/api/chats/<chat_id>/upload")
     @require_auth
     def api_upload_file(chat_id):
+        if g.role == "guest":
+            return jsonify({"error": "Guest accounts can't upload files or send messages"}), 403
         chat = load_chat_by_id(chat_id)
         if not chat:
             return jsonify({"error": "not found"}), 404

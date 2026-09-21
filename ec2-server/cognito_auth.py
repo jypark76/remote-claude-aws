@@ -42,8 +42,16 @@ def username_from_claims(claims):
     return claims.get("cognito:username") or claims.get("username")
 
 
-def role_for(username):
-    return "admin" if username == "admin" else "user"
+def role_for(claims):
+    """Role comes from Cognito itself (username, and the signed cognito:groups
+    claim for 'guests'), never from app-side string matching alone - a bug in
+    a route handler can't accidentally grant guest privileges to a real user."""
+    username = username_from_claims(claims)
+    if username == "admin":
+        return "admin"
+    if "guests" in (claims.get("cognito:groups") or []):
+        return "guest"
+    return "user"
 
 
 def require_auth(f):
@@ -58,7 +66,7 @@ def require_auth(f):
         except Exception as e:
             return jsonify({"error": "invalid or expired login token", "detail": str(e)}), 401
         g.username = username_from_claims(claims)
-        g.role = role_for(g.username)
+        g.role = role_for(claims)
         return f(*args, **kwargs)
     return wrapper
 
