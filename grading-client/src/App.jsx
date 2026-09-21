@@ -847,6 +847,9 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
         showFiles(msg.files);
       } else if (msg.type === "chat_deleted") {
         onDeleted();
+      } else if (msg.type === "error") {
+        stopThinking();
+        addBubble("claude", msg.message || "Something went wrong.", Date.now());
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

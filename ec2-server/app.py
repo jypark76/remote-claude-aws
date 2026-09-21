@@ -31,11 +31,17 @@ WEB_DIR = os.path.join(os.path.expanduser("~"), "web")
 @app.route("/<path:path>")
 def serve_ui(path):
     """Serves the built React app. Anything that isn't a real file (e.g. a
-    refresh on a client-side view) falls back to index.html."""
+    refresh on a client-side view) falls back to index.html.
+
+    index.html itself is never cache-busted (its filename doesn't change),
+    so it must never be cached - otherwise a browser can keep pointing at
+    JS/CSS bundles that were already deleted off disk by a later deploy."""
     full = os.path.join(WEB_DIR, path)
     if path and os.path.isfile(full):
         return send_from_directory(WEB_DIR, path)
-    return send_from_directory(WEB_DIR, "index.html")
+    resp = send_from_directory(WEB_DIR, "index.html")
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
 
 
 if __name__ == "__main__":
