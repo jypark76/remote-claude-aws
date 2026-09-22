@@ -836,6 +836,8 @@ def init_chats(app):
     @app.post("/api/chats")
     @require_auth
     def api_create_chat():
+        if g.role == "guest":
+            return jsonify({"error": "Guest accounts can't create chats"}), 403
         body = request.get_json() or {}
         title = body.get("title") or ("Chat " + time.strftime("%Y-%m-%d %H:%M:%S"))
         dir_name = unique_dir_name(sanitize_name(title))

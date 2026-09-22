@@ -317,7 +317,9 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
           )}
           <button className="text-btn" onClick={onLogout} title="Logout">Logout</button>
           <button className="new-btn round" onClick={onOpenTables} title="Browse database tables">&#128452;&#65039;</button>
-          <button className="new-btn round" onClick={newChat} title="New chat">+</button>
+          {role !== "guest" && (
+            <button className="new-btn round" onClick={newChat} title="New chat">+</button>
+          )}
         </div>
       </div>
 
