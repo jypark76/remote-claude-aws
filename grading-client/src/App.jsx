@@ -65,9 +65,8 @@ function fileIcon(name) {
 }
 const IMG_EXT = /\.(png|jpg|jpeg|gif|webp)$/i;
 
-function Avatar({ incognito, ownerId, className }) {
+function Avatar({ ownerId, className }) {
   const [errored, setErrored] = useState(false);
-  if (incognito) return <div className={className}>👻</div>;
   if (errored) return <div className={className}>👤</div>;
   return (
     <div className={className}>
@@ -176,21 +175,9 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
   const [sortDir, setSortDir] = useState(localStorage.getItem("sortDir") || "desc");
   const [storage, setStorage] = useState(null);
   const [liveVerbs, setLiveVerbs] = useState({});
-  const [stats, setStats] = useState(null);
   const [killing, setKilling] = useState(false);
   const dragSrc = useRef(null);
   const [dragOverId, setDragOverId] = useState(null);
-
-  useEffect(() => {
-    if (role !== "admin") return;
-    let cancelled = false;
-    function poll() {
-      api("/api/stats", token).then((d) => !cancelled && setStats(d)).catch(() => {});
-    }
-    poll();
-    const t = setInterval(poll, 5000);
-    return () => { cancelled = true; clearInterval(t); };
-  }, [role, token]);
 
   async function killServer() {
     if (!window.confirm("Shut down the server?")) return;
@@ -257,18 +244,6 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     }
   }
 
-  async function newIncognito() {
-    try {
-      const chat = await api("/api/chats", token, {
-        method: "POST",
-        body: JSON.stringify({ title: "Incognito", incognito: true }),
-      });
-      onOpen(chat.id);
-    } catch {
-      load();
-    }
-  }
-
   async function deleteChat(e, c) {
     e.stopPropagation();
     if (!window.confirm(`Delete "${c.title}"?`)) return;
@@ -282,8 +257,8 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     const sorted = [...list].sort((a, b) => {
       let av, bv;
       if (sortField === "created") { av = a.createdAt || 0; bv = b.createdAt || 0; }
-      else if (sortField === "name") { av = (a.incognito ? "incognito" : a.title).toLowerCase(); bv = (b.incognito ? "incognito" : b.title).toLowerCase(); }
-      else if (sortField === "owner") { av = (a.incognito ? "incognito" : a.ownerId || "admin").toLowerCase(); bv = (b.incognito ? "incognito" : b.ownerId || "admin").toLowerCase(); }
+      else if (sortField === "name") { av = a.title.toLowerCase(); bv = b.title.toLowerCase(); }
+      else if (sortField === "owner") { av = (a.ownerId || "admin").toLowerCase(); bv = (b.ownerId || "admin").toLowerCase(); }
       else if (sortField === "thinking") { av = a.isRunning ? 1 : 0; bv = b.isRunning ? 1 : 0; }
       else { av = a.updatedAt || 0; bv = b.updatedAt || 0; }
       if (av < bv) return sortDir === "asc" ? -1 : 1;
@@ -335,16 +310,12 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
           <button className="icon-btn-sm" onClick={() => setMenuOpen((v) => !v)} title="Sort & Search">
             <span className={"menu-arrow" + (menuOpen ? " open" : "")}>&#9660;</span>
           </button>
-          {role === "admin" && stats && (
-            <span className="incognito-watch">&#128123; {stats.activeIncognito}/{stats.totalUsers}</span>
-          )}
         </h1>
         <div id="list-header-btns">
           {role === "admin" && (
             <button className="kill-btn" onClick={killServer} disabled={killing} title="Shut down the server">Kill</button>
           )}
           <button className="text-btn" onClick={onLogout} title="Logout">Logout</button>
-          <button className="new-btn round" onClick={newIncognito} title="Incognito chat">&#128123;</button>
           <button className="new-btn round" onClick={onOpenTables} title="Browse database tables">&#128452;&#65039;</button>
           <button className="new-btn round" onClick={newChat} title="New chat">+</button>
         </div>
@@ -397,7 +368,7 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
         )}
         {!loading && !error && visible.map((c) => {
           const running = c.isRunning || liveVerbs[c.id];
-          const canDelete = role === "admin" || c.ownerId === username;
+          const canDelete = role === "admin";
           return (
             <div
               key={c.id}
@@ -409,9 +380,9 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
               onDrop={() => onDrop(c.id)}
               onClick={() => onOpen(c.id)}
             >
-              <Avatar incognito={c.incognito} ownerId={c.ownerId} className="chat-avatar" />
+              <Avatar ownerId={c.ownerId} className="chat-avatar" />
               <div className="chat-info">
-                <div className="chat-title">{c.incognito ? "Incognito" : c.title}</div>
+                <div className="chat-title">{c.title}</div>
                 <div className="chat-preview">
                   {running ? (
                     <span className="live-verb">✶ {liveVerbs[c.id] || "Thinking…"}</span>
@@ -740,22 +711,6 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
   const chatRef = useRef(chat);
   chatRef.current = chat;
 
-  useEffect(() => {
-    function onPageHide() {
-      if (chatRef.current?.incognito) {
-        fetch(`${API_BASE}/api/chats/${chatId}`, { method: "DELETE", headers: { Authorization: token }, keepalive: true }).catch(() => {});
-      }
-    }
-    window.addEventListener("pagehide", onPageHide);
-    return () => window.removeEventListener("pagehide", onPageHide);
-  }, [chatId, token]);
-
-  async function handleBack() {
-    if (chat?.incognito) {
-      await api(`/api/chats/${chatId}`, token, { method: "DELETE" }).catch(() => {});
-    }
-    onBack();
-  }
 
   function scrollToBottom() {
     requestAnimationFrame(() => {
@@ -1003,17 +958,17 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
       {dropActive && <div id="drop-overlay">Drop files to attach</div>}
       <div id="chat-header">
         <div className="chat-header-left">
-          <button id="back-btn" onClick={handleBack}>&#8249; Back</button>
+          <button id="back-btn" onClick={onBack}>&#8249; Back</button>
           <button className="icon-btn-sm" onClick={loadChat} title="Refresh">&#8635;</button>
           <button className="icon-btn-sm" onClick={() => setSearchOpen((v) => !v)} title="Search messages">
             <span className={"menu-arrow" + (searchOpen ? " open" : "")}>&#9660;</span>
           </button>
         </div>
         <div className="chat-header-center">
-          <Avatar incognito={chat?.incognito} ownerId={chat?.ownerId} className="chat-header-avatar" />
+          <Avatar ownerId={chat?.ownerId} className="chat-header-avatar" />
           <span id="chat-title-el" onClick={rename}>{chat?.title || "..."}</span>
         </div>
-        {canWrite && !chat?.incognito && (
+        {canWrite && (
           <button className="icon-btn-sm" onClick={rename} title="Rename">✏️</button>
         )}
       </div>

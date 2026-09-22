@@ -1,6 +1,6 @@
 """Python/Flask port of remote-claude-public's server.js: chat CRUD, file
 upload/download, live streaming of the Claude Code CLI over WebSocket,
-git sync, storage tracking, pins, cleanup, export, and incognito sandboxing.
+git sync, storage tracking, pins, cleanup, and export.
 CLAUDE.md is regenerated fresh from code on every save - no agent-writable
 memory file, state lives only in Postgres, queried fresh each time."""
 import csv
@@ -337,14 +337,6 @@ Files you create here are delivered to the user automatically. Files the user
 uploads are saved here and can be read by name.
 """
 
-BASE_INCOGNITO_CLAUDE_MD = """# remote_claude Incognito Session
-
-You are in an INCOGNITO session: private, temporary, and hard-restricted to
-this chat's folder only. Do not access anything outside this directory. Do not
-use any memory tools or reference anything from previous conversations.
-"""
-
-
 # ---------------- storage / disk usage ----------------
 _repo_size_bytes = 0
 _repo_size_ts = 0
@@ -420,13 +412,6 @@ def unique_dir_name(base):
     return name
 
 
-def next_incognito_dir_name():
-    i = 1
-    while os.path.exists(os.path.join(CHATS_DIR, f"incognito-{i}")):
-        i += 1
-    return f"incognito-{i}"
-
-
 def conv_path(dir_name):
     return os.path.join(CHATS_DIR, dir_name, "conversation.json")
 
@@ -463,10 +448,7 @@ def load_chat_by_id(chat_id):
 
 def chat_claude_md(chat):
     owner = resolve_owner(chat)
-    if chat.get("incognito"):
-        base = BASE_INCOGNITO_CLAUDE_MD + grading_persona(owner)
-    else:
-        base = (BASE_CLAUDE_MD if owner == "admin" else BASE_USER_CLAUDE_MD) + grading_persona(owner)
+    base = (BASE_CLAUDE_MD if owner == "admin" else BASE_USER_CLAUDE_MD) + grading_persona(owner)
     pins = chat.get("pinnedFiles") or []
     if pins:
         base = base.rstrip() + "\n\n## Pinned Files\nAlways reference and defer to these:\n" + "\n".join(f"- {p}" for p in pins) + "\n"
@@ -657,7 +639,7 @@ def run_claude_message(chat_id, user_text):
     ensure_git_repo(chat_dir)
 
     prompt = user_text
-    if not session["session_id"] and not chat.get("incognito") and len(chat.get("messages", [])) > 1:
+    if not session["session_id"] and len(chat.get("messages", [])) > 1:
         history = chat["messages"][:-1][-10:]
         hist_text = "\n\n".join(f"{'User' if m['role'] == 'user' else 'Claude'}: {m['text']}" for m in history)
         prompt = f"[CONTEXT]\n{hist_text}\n\n[MESSAGE]\n{user_text}"
@@ -835,13 +817,12 @@ def init_chats(app):
             sess = _sessions.get(c["id"], {})
             out.append({
                 "id": c["id"], "title": c["title"], "dirName": c["dirName"],
-                "incognito": c.get("incognito", False), "ownerId": resolve_owner(c),
+                "ownerId": resolve_owner(c),
                 "updatedAt": c.get("updatedAt"),
                 "preview": (c.get("messages") or [{}])[-1].get("text", "")[:80] if c.get("messages") else "",
                 "isRunning": bool(sess.get("running")), "runStartTime": sess.get("start_time"),
             })
-        incognito_count = sum(1 for c in chats if c.get("incognito"))
-        return jsonify({"chats": out, "meta": {"activeIncognito": incognito_count, "totalUsers": 2}})
+        return jsonify({"chats": out, "meta": {"totalUsers": 2}})
 
     @app.patch("/api/chat-order")
     @require_auth
@@ -857,11 +838,10 @@ def init_chats(app):
     def api_create_chat():
         body = request.get_json() or {}
         title = body.get("title") or ("Chat " + time.strftime("%Y-%m-%d %H:%M:%S"))
-        incognito = body.get("incognito") is True
-        dir_name = next_incognito_dir_name() if incognito else unique_dir_name(sanitize_name(title))
+        dir_name = unique_dir_name(sanitize_name(title))
         chat = {
             "id": str(uuid.uuid4()), "title": title, "dirName": dir_name,
-            "incognito": incognito or False, "ownerId": g.username, "sessionId": None,
+            "ownerId": g.username, "sessionId": None,
             "createdAt": int(time.time() * 1000), "updatedAt": int(time.time() * 1000), "messages": [],
         }
         save_chat(chat)
@@ -902,11 +882,10 @@ def init_chats(app):
     @app.delete("/api/chats/<chat_id>")
     @require_auth
     def api_delete_chat(chat_id):
+        if g.role != "admin":
+            return jsonify({"error": "Forbidden"}), 403
         chat = load_chat_by_id(chat_id)
         if chat:
-            err = _require_owner_or_admin(chat)
-            if err:
-                return err
             sess = _sessions.get(chat_id)
             if sess and sess.get("proc"):
                 try:
@@ -1214,15 +1193,6 @@ def init_chats(app):
         return jsonify({"columns": columns, "rows": rows})
 
     # ---- admin-only ----
-    @app.get("/api/stats")
-    @require_auth
-    def api_stats():
-        if g.role != "admin":
-            return jsonify({"error": "Forbidden"}), 403
-        chats = list_chats()
-        incognito_count = sum(1 for c in chats if c.get("incognito"))
-        return jsonify({"activeIncognito": incognito_count, "totalUsers": 2})
-
     @app.post("/api/shutdown")
     @require_auth
     def api_shutdown():
