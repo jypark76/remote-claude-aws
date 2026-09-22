@@ -165,7 +165,7 @@ function LoginScreen({ onLogin }) {
 }
 
 // ---------------- Chat list ----------------
-function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpenTables }) {
+function ChatListScreen({ token, username, role, socket, onOpen, onLogout }) {
   const [chats, setChats] = useState([]);
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -345,7 +345,6 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
           )}
           <button className="text-btn" onClick={onLogout} title="Logout">Logout</button>
           <button className="new-btn round" onClick={newIncognito} title="Incognito chat">&#128123;</button>
-          <button className="new-btn round" onClick={onOpenTables} title="Browse database tables">&#128452;&#65039;</button>
           <button className="new-btn round" onClick={newChat} title="New chat">+</button>
         </div>
       </div>
@@ -429,130 +428,6 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
           );
         })}
       </div>
-    </div>
-  );
-}
-
-// ---------------- Database browser (read-only) ----------------
-function TablesScreen({ token, onOpen, onBack }) {
-  const [tables, setTables] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [exporting, setExporting] = useState(false);
-
-  useEffect(() => {
-    api("/api/tables", token)
-      .then((d) => setTables(d.tables || []))
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
-  }, [token]);
-
-  function exportCsv() {
-    setExporting(true);
-    const url = `${API_BASE}/api/tables/export?token=${encodeURIComponent(token)}`;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "database_export.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => setExporting(false), 800);
-  }
-
-  return (
-    <div id="list-screen">
-      <div id="list-header">
-        <div className="chat-header-left">
-          <button id="back-btn" onClick={onBack}>&#8249; Back</button>
-        </div>
-        <h1>Database tables</h1>
-        <button className="icon-btn-sm" onClick={exportCsv} disabled={exporting} title="Export all tables as CSV">
-          &#128230;
-        </button>
-      </div>
-      <div id="chat-list">
-        {loading && <p className="empty-note">Loading...</p>}
-        {error && <p className="empty-note error-note">Could not load tables.</p>}
-        {!loading && !error && tables.length === 0 && <p className="empty-note">No tables found.</p>}
-        {!loading && !error && tables.map((t) => (
-          <div key={t} className="chat-row" onClick={() => onOpen(t)}>
-            <div className="chat-avatar">&#128451;&#65039;</div>
-            <div className="chat-info">
-              <div className="chat-title">{t}</div>
-              <div className="chat-preview">read-only</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TableDetailScreen({ token, tableName, onBack }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [cellView, setCellView] = useState(null);
-
-  useEffect(() => {
-    setLoading(true);
-    setError(false);
-    api(`/api/tables/${encodeURIComponent(tableName)}`, token)
-      .then(setData)
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
-  }, [token, tableName]);
-
-  return (
-    <div id="chat-screen">
-      <div id="chat-header">
-        <div className="chat-header-left">
-          <button id="back-btn" onClick={onBack}>&#8249; Back</button>
-        </div>
-        <div className="chat-header-center">
-          <span id="chat-title-el">{tableName}</span>
-        </div>
-        <span style={{ width: 50 }} />
-      </div>
-      <div className="db-table-wrap">
-        {loading && <p className="empty-note">Loading...</p>}
-        {error && <p className="empty-note error-note">Could not load this table.</p>}
-        {data && data.rows.length === 0 && <p className="empty-note">No rows.</p>}
-        {data && data.rows.length > 0 && (
-          <div className="db-table-scroll">
-            <table className="db-table">
-              <thead>
-                <tr>{data.columns.map((c) => <th key={c}>{c}</th>)}</tr>
-              </thead>
-              <tbody>
-                {data.rows.map((row, i) => (
-                  <tr key={i}>
-                    {row.map((v, j) => (
-                      <td
-                        key={j}
-                        className="db-cell"
-                        onClick={() => v !== null && setCellView({ column: data.columns[j], value: v })}
-                      >
-                        {v === null ? <span className="null-val">null</span> : String(v)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {cellView && (
-        <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setCellView(null)}>
-          <div className="modal-card">
-            <div className="modal-title">{cellView.column}</div>
-            <pre className="cell-full-value">{cellView.value}</pre>
-            <button className="modal-close" onClick={() => setCellView(null)}>Close</button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1210,27 +1085,6 @@ export default function App() {
     );
   }
 
-  if (view.screen === "tables") {
-    return (
-      <TablesScreen
-        token={token}
-        onOpen={(table) => setView({ screen: "tableDetail", table })}
-        onBack={() => setView({ screen: "list" })}
-      />
-    );
-  }
-
-  if (view.screen === "tableDetail") {
-    return (
-      <TableDetailScreen
-        key={view.table}
-        token={token}
-        tableName={view.table}
-        onBack={() => setView({ screen: "tables" })}
-      />
-    );
-  }
-
   return (
     <ChatListScreen
       token={token}
@@ -1239,7 +1093,6 @@ export default function App() {
       socket={socket}
       onOpen={(id) => setView({ screen: "chat", id })}
       onLogout={logout}
-      onOpenTables={() => setView({ screen: "tables" })}
     />
   );
 }
