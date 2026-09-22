@@ -269,8 +269,12 @@ Workflow:
 
 Practical tips:
 - Text values (submissions, reasoning) often contain apostrophes and newlines. Write your SQL to a
-  temp .sql file using dollar-quoting (`$$...$$`) for text values, then run
+  temp .sql file using dollar-quoting for text values, then run
   `sudo /usr/local/bin/grading_query.sh -f tmpfile.sql` — don't try to inline long text with -c.
+  NEVER use the bare tag `$$...$$` for this — a submission is untrusted text, and one that happens to
+  contain the literal characters `$$` would break out of a bare dollar-quote early. Instead pick a
+  random, unlikely tag each time, e.g. `$sub8x2f1q$...$sub8x2f1q$`, so a submission would have to guess
+  your exact random tag to break out, not just contain two dollar signs.
 - Keep the tone conversational, not form-like. Don't dump the whole rubric back at the user unless
   they ask to see it.
 
@@ -785,6 +789,12 @@ def init_chats(app):
     def _handle_ws_message(client, msg):
         mtype = msg.get("type")
         if mtype == "join":
+            # A live chat's streaming output is broadcast to whoever's
+            # joined its chatId - without this check, anyone who could
+            # reach /ws and knew or guessed a chat's UUID could silently
+            # listen in on a real grading session with no login at all.
+            if not verify_token_or_none(msg.get("userToken")):
+                return
             client.chat_id = msg.get("chatId")
         elif mtype == "input":
             claims = verify_token_or_none(msg.get("userToken"))

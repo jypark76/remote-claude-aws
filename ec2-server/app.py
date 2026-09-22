@@ -9,13 +9,16 @@ submissions, grading attempts). This file just wires up the Flask app and
 serves the built React UI.
 """
 from flask import Flask, jsonify, send_from_directory
-from flask_cors import CORS   # lets the browser call this API from a different origin
 import os
 
 from chats import init_chats
 
 app = Flask(__name__)
-CORS(app)
+# No CORS(app) here on purpose: the real site and this API are always served
+# from the same origin (see config.js's API_BASE comment), so cross-origin
+# requests are never legitimate - only ever an attacker's page trying to call
+# a logged-in user's session. Nothing needs allowing.
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB - this box has an 8GB disk total
 init_chats(app)
 
 

@@ -820,7 +820,7 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
 
   useEffect(() => {
     loadChat();
-    socket.send({ type: "join", chatId });
+    socket.send({ type: "join", chatId, userToken: token });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId]);
 
