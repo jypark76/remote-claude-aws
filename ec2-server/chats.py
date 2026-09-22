@@ -4,19 +4,18 @@ git sync, storage tracking, pins, cleanup, and export.
 CLAUDE.md is regenerated fresh from code on every save - no agent-writable
 memory file, state lives only in Postgres, queried fresh each time."""
 import csv
-import datetime
 import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
 import zipfile
 from io import BytesIO, StringIO
 
-import psycopg2
 from flask import request, jsonify, send_file, g
 from werkzeug.utils import secure_filename
 from flask_sock import Sock
@@ -24,20 +23,50 @@ from flask_sock import Sock
 from cognito_auth import require_auth, verify_token_or_none, username_from_claims, role_for
 
 
-def get_db():
-    """Read-only browsing connection to the same Postgres DB Claude reads/writes via psql."""
-    return psycopg2.connect(
-        host=os.environ["DB_HOST"],
-        dbname=os.environ.get("DB_NAME", "postgres"),
-        user=os.environ.get("DB_USER", "dbadmin"),
-        password=os.environ["DB_PASSWORD"],
-    )
+_PSET_PREFIX = (
+    "\\set QUIET on\n"
+    "\\pset format unaligned\n\\pset fieldsep '\\x1f'\n\\pset recordsep '\\x1e'\n"
+    "\\pset tuples_only off\n\\pset footer off\n"
+)
 
 
-def _json_safe(value):
-    if isinstance(value, (datetime.datetime, datetime.date)):
-        return value.isoformat()
-    return value
+def run_readonly_query(sql):
+    """Runs a read-only query through the SAME sudo-gated wrapper script the
+    grading AI itself uses (grading_app role - SELECT only in practice here,
+    same as everywhere else in this file). Flask never holds a direct DB
+    credential of its own for this - there used to be a DB_HOST/DB_USER/
+    DB_PASSWORD copy sitting in this process's own environment file, readable
+    by the same OS user (ec2-user) the AI's Bash tool runs as, which meant
+    the AI could just read that file directly and bypass the wrapper
+    entirely. Removed; this is the only DB access path in the whole app now.
+
+    \\set QUIET on matters here, not just for tidiness: without it, psql's own
+    "Record separator is "<char>"." confirmation message literally embeds the
+    raw \\x1e byte inside itself, which corrupts a naive split on \\x1e right
+    at the header - caught by testing the actual output byte-for-byte, not
+    by reasoning about what psql "should" print.
+
+    Returns (columns, rows) - rows as lists of strings (everything comes
+    back as text through this path, same as psql's own output)."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".sql", delete=False, encoding="utf-8") as f:
+        f.write(_PSET_PREFIX + sql if sql.rstrip().endswith(";") else _PSET_PREFIX + sql + ";")
+        path = f.name
+    try:
+        result = subprocess.run(
+            ["sudo", "/usr/local/bin/grading_query.sh", "-f", path],
+            capture_output=True, text=True, timeout=30,
+        )
+    finally:
+        os.unlink(path)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "query failed")
+    lines = [l for l in result.stdout.split("\x1e") if l.strip("\n")]
+    if not lines:
+        return [], []
+    columns = lines[0].strip("\n").split("\x1f")
+    rows = [line.strip("\n").split("\x1f") for line in lines[1:]]
+    return columns, rows
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(os.path.expanduser("~"), "assets")
@@ -1117,51 +1146,32 @@ def init_chats(app):
         return send_file(full, mimetype=MIME.get(ext, "application/octet-stream"))
 
     # ---- read-only database browser ----
-    @app.get("/api/tables")
-    @require_auth
-    def api_list_tables():
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
+    def list_table_names():
+        _, rows = run_readonly_query(
             "SELECT table_name FROM information_schema.tables "
             "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name"
         )
-        tables = [r[0] for r in cur.fetchall()]
-        cur.close()
-        conn.close()
-        return jsonify({"tables": tables})
+        return [r[0] for r in rows]
+
+    @app.get("/api/tables")
+    @require_auth
+    def api_list_tables():
+        return jsonify({"tables": list_table_names()})
 
     @app.get("/api/tables/export")
     @require_auth
     def api_export_tables():
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name"
-        )
-        tables = [r[0] for r in cur.fetchall()]
-
         buf = StringIO()
         writer = csv.writer(buf)
-        for table in tables:
-            cur.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = 'public' AND table_name = %s ORDER BY ordinal_position",
-                (table,),
-            )
-            columns = [r[0] for r in cur.fetchall()]
-            cur.execute(f'SELECT * FROM "{table}"')
-            rows = cur.fetchall()
-
+        for table in list_table_names():
+            # table came from information_schema itself, not user input, so
+            # it's already a known-real identifier - safe to interpolate
+            columns, rows = run_readonly_query(f'SELECT * FROM "{table}"')
             buf.write(f"# {table}\n")
             writer.writerow(columns)
             for row in rows:
-                writer.writerow([_json_safe(v) for v in row])
+                writer.writerow(row)
             buf.write("\n")
-
-        cur.close()
-        conn.close()
 
         data = buf.getvalue().encode("utf-8")
         return send_file(
@@ -1174,24 +1184,18 @@ def init_chats(app):
     @app.get("/api/tables/<table_name>")
     @require_auth
     def api_table_rows(table_name):
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = 'public' AND table_name = %s ORDER BY ordinal_position",
-            (table_name,),
-        )
-        columns = [r[0] for r in cur.fetchall()]
-        if not columns:
-            cur.close()
-            conn.close()
+        # Validate against the real table list before ever using table_name
+        # in a query - it comes straight from the URL, so this is the only
+        # thing standing between it and a SQL identifier position.
+        if table_name not in list_table_names():
             return jsonify({"error": "unknown table"}), 404
-
-        order_clause = ' ORDER BY "created_at" DESC' if "created_at" in columns else ""
-        cur.execute(f'SELECT * FROM "{table_name}"{order_clause} LIMIT 200')
-        rows = [[_json_safe(v) for v in row] for row in cur.fetchall()]
-        cur.close()
-        conn.close()
+        _, col_rows = run_readonly_query(
+            "SELECT column_name FROM information_schema.columns "
+            f"WHERE table_schema = 'public' AND table_name = '{table_name}' ORDER BY ordinal_position"
+        )
+        known_columns = [r[0] for r in col_rows]
+        order_clause = ' ORDER BY "created_at" DESC' if "created_at" in known_columns else ""
+        columns, rows = run_readonly_query(f'SELECT * FROM "{table_name}"{order_clause} LIMIT 200')
         return jsonify({"columns": columns, "rows": rows})
 
     # ---- admin-only ----
