@@ -76,7 +76,10 @@ if os.path.exists(_ENV_PATH):
 # gated by that app-level role distinction, so it doesn't weaken what these
 # specific checks prove.
 # ---------------------------------------------------------------------------
-BASE_URL = "http://18.223.109.77:5000"
+BASE_URL = "https://d1qjlzxncy7kb2.cloudfront.net"
+# The raw EC2 origin's security group now only accepts traffic from CloudFront
+# (locked down so the plain-HTTP origin can't be reached directly, forcing
+# every real client through HTTPS) - this is the only URL that still works.
 CLIENT_ID = "2i3n92b14gl2gb6pl7jmivosdr"          # Cognito app client id (public, not a secret)
 COGNITO_REGION = "us-east-2"
 SSH_KEY = r"C:\Users\jypar\.ssh\remote-claude-aws-key.pem"
@@ -154,7 +157,7 @@ def send_and_wait(chat_id, token, text, timeout=90):
     import asyncio
     import websockets
 
-    ws_url = BASE_URL.replace("http://", "ws://") + "/ws"
+    ws_url = BASE_URL.replace("https://", "wss://").replace("http://", "ws://") + "/ws"
 
     async def _send():
         async with websockets.connect(ws_url) as ws:
