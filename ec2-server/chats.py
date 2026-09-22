@@ -3,6 +3,8 @@ upload/download, live streaming of the Claude Code CLI over WebSocket,
 git sync, storage tracking, pins, cleanup, export, and incognito sandboxing.
 CLAUDE.md is regenerated fresh from code on every save - no agent-writable
 memory file, state lives only in Postgres, queried fresh each time."""
+import csv
+import datetime
 import json
 import os
 import re
@@ -12,14 +14,30 @@ import threading
 import time
 import uuid
 import zipfile
-from io import BytesIO
+from io import BytesIO, StringIO
 
+import psycopg2
 from flask import request, jsonify, send_file, g
 from werkzeug.utils import secure_filename
 from flask_sock import Sock
 
 from cognito_auth import require_auth, verify_token_or_none, username_from_claims, role_for
 
+
+def get_db():
+    """Read-only browsing connection to the same Postgres DB Claude reads/writes via psql."""
+    return psycopg2.connect(
+        host=os.environ["DB_HOST"],
+        dbname=os.environ.get("DB_NAME", "postgres"),
+        user=os.environ.get("DB_USER", "dbadmin"),
+        password=os.environ["DB_PASSWORD"],
+    )
+
+
+def _json_safe(value):
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
+    return value
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(os.path.expanduser("~"), "assets")
@@ -1106,6 +1124,84 @@ def init_chats(app):
             return jsonify({"error": "not found"}), 404
         ext = os.path.splitext(full)[1].lower()
         return send_file(full, mimetype=MIME.get(ext, "application/octet-stream"))
+
+    # ---- read-only database browser ----
+    @app.get("/api/tables")
+    @require_auth
+    def api_list_tables():
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name"
+        )
+        tables = [r[0] for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return jsonify({"tables": tables})
+
+    @app.get("/api/tables/export")
+    @require_auth
+    def api_export_tables():
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name"
+        )
+        tables = [r[0] for r in cur.fetchall()]
+
+        buf = StringIO()
+        writer = csv.writer(buf)
+        for table in tables:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s ORDER BY ordinal_position",
+                (table,),
+            )
+            columns = [r[0] for r in cur.fetchall()]
+            cur.execute(f'SELECT * FROM "{table}"')
+            rows = cur.fetchall()
+
+            buf.write(f"# {table}\n")
+            writer.writerow(columns)
+            for row in rows:
+                writer.writerow([_json_safe(v) for v in row])
+            buf.write("\n")
+
+        cur.close()
+        conn.close()
+
+        data = buf.getvalue().encode("utf-8")
+        return send_file(
+            BytesIO(data),
+            mimetype="text/csv",
+            as_attachment=True,
+            download_name="database_export.csv",
+        )
+
+    @app.get("/api/tables/<table_name>")
+    @require_auth
+    def api_table_rows(table_name):
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = %s ORDER BY ordinal_position",
+            (table_name,),
+        )
+        columns = [r[0] for r in cur.fetchall()]
+        if not columns:
+            cur.close()
+            conn.close()
+            return jsonify({"error": "unknown table"}), 404
+
+        order_clause = ' ORDER BY "created_at" DESC' if "created_at" in columns else ""
+        cur.execute(f'SELECT * FROM "{table_name}"{order_clause} LIMIT 200')
+        rows = [[_json_safe(v) for v in row] for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return jsonify({"columns": columns, "rows": rows})
 
     # ---- admin-only ----
     @app.get("/api/stats")
