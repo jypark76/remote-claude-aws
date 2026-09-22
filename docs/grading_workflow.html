@@ -21,7 +21,7 @@
 <body>
 <svg width="100%" viewBox="0 0 680 560" style="max-width:680px;display:block;margin:0 auto" role="img">
 <title>Submission grading workflow with revision loop</title>
-<desc>A student submission is uploaded, the AI grades it as a new attempt, the result is shown to the instructor in chat. If approved, it's copied into the graded_examples bank. If not, the instructor leaves a comment explaining why, and the AI grades it again as a new attempt, incorporating that feedback, looping until approved.</desc>
+<desc>A student submission is uploaded, the AI grades it as a new attempt, calibrating against graded_examples for the same assignment - or, if none exist yet, searching every assignment's examples by embedding similarity instead. The result is shown to the instructor in chat. If approved, it's copied into the graded_examples bank along with its embedding. If not, the instructor leaves a comment explaining why, and the AI grades it again as a new attempt, incorporating that feedback, looping until approved.</desc>
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
 
 <line x1="340" y1="90" x2="340" y2="130" class="arr" marker-end="url(#arrow)"/>
@@ -44,6 +44,7 @@
   <text x="340" y="150" text-anchor="middle" class="th">AI grades it</text>
   <text x="340" y="167" text-anchor="middle" class="ts">&#8594; grading_attempts</text>
 </g>
+<text x="340" y="196" text-anchor="middle" class="ts" fill="#9A8F3E">no examples yet for this assignment? searches graded_examples.embedding across all assignments instead</text>
 
 <g class="c-blue">
   <rect x="230" y="220" width="220" height="50" rx="4"/>
@@ -60,7 +61,7 @@
 <g class="c-teal">
   <rect x="390" y="400" width="220" height="64" rx="4"/>
   <text x="500" y="420" text-anchor="middle" class="th">Copied to bank</text>
-  <text x="500" y="437" text-anchor="middle" class="ts">&#8594; graded_examples</text>
+  <text x="500" y="437" text-anchor="middle" class="ts">&#8594; graded_examples (+ embedding)</text>
   <text x="500" y="452" text-anchor="middle" class="ts">&#8594; submissions.status</text>
 </g>
 
