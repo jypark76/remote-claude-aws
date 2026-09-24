@@ -1,6 +1,0 @@
-*.tfstate
-*.tfstate.*
-.terraform/
-.terraform.lock.hcl
-*.tfvars
-../lambda/handler.zip
