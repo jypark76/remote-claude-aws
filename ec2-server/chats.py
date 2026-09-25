@@ -425,6 +425,7 @@ def schedule_s3_sync():
 
 # ---------------- chat CRUD ----------------
 _chat_cache = {}
+_chat_cache_mtime = {}
 _chat_cache_lock = threading.Lock()
 
 
@@ -457,8 +458,32 @@ def all_chat_dirs():
 
 def load_chat_by_id(chat_id):
     with _chat_cache_lock:
-        if chat_id in _chat_cache:
-            return _chat_cache[chat_id]
+        cached = _chat_cache.get(chat_id)
+        cached_mtime = _chat_cache_mtime.get(chat_id)
+    if cached:
+        # Multiple EC2 instances share these files over EFS, but each has
+        # its own separate in-memory cache - a write on one instance never
+        # touches another's cache, so a bare cache hit can go stale the
+        # moment more than one process exists. A single getmtime() is
+        # cheap enough to always confirm the file hasn't moved since,
+        # rather than trusting the cache blindly.
+        p = conv_path(cached["dirName"])
+        try:
+            disk_mtime = os.path.getmtime(p)
+        except OSError:
+            disk_mtime = None
+        if disk_mtime is not None:
+            if disk_mtime == cached_mtime:
+                return cached
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    c = json.load(f)
+                with _chat_cache_lock:
+                    _chat_cache[c["id"]] = c
+                    _chat_cache_mtime[c["id"]] = disk_mtime
+                return c
+            except (OSError, json.JSONDecodeError):
+                return cached
     for d in all_chat_dirs():
         p = conv_path(d)
         if not os.path.exists(p):
@@ -468,6 +493,7 @@ def load_chat_by_id(chat_id):
                 c = json.load(f)
             with _chat_cache_lock:
                 _chat_cache[c["id"]] = c
+                _chat_cache_mtime[c["id"]] = os.path.getmtime(p)
             if c["id"] == chat_id:
                 return c
         except (OSError, json.JSONDecodeError):
@@ -496,20 +522,56 @@ def write_chat_md(chat):
         f.write(chat_claude_md(chat))
 
 
+PATH_GUARD_HOOK = "/home/ec2-user/hooks/path_guard.py"
+
+
+def write_chat_settings(chat):
+    """Standard-user chats get their CLAUDE.md's 'HARD SECURITY RESTRICTION'
+    backed by an actual PreToolUse hook, not just the model's own compliance -
+    Read/Write/Edit/MultiEdit calls that resolve outside this chat's own
+    directory get blocked before they run, and Bash commands are checked
+    against an allowlist of the app's actual documented workflow shapes
+    (see path_guard.py) rather than trusting the model to stay in its lane
+    there too. The matcher MUST list Bash explicitly - Claude Code only
+    invokes a hook for tool names the matcher names, so leaving Bash out
+    means the hook script's own Bash-handling code never runs at all, not
+    that it runs and passes. Admin keeps no restriction, per BASE_CLAUDE_MD's
+    full-filesystem-access design. Regenerated every save, same as
+    CLAUDE.md, so an existing chat picks this up too, not just new ones -
+    and so nothing here can be edited away by anything writing into the
+    chat folder."""
+    d = os.path.join(CHATS_DIR, chat["dirName"])
+    settings_dir = os.path.join(d, ".claude")
+    os.makedirs(settings_dir, exist_ok=True)
+    settings_path = os.path.join(settings_dir, "settings.json")
+    if resolve_owner(chat) == "admin":
+        settings = {}
+    else:
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Read|Write|Edit|MultiEdit|Bash",
+                        "hooks": [{"type": "command", "command": f"python3 {PATH_GUARD_HOOK}"}],
+                    }
+                ]
+            }
+        }
+    with open(settings_path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2)
+
+
 def save_chat(chat):
     d = os.path.join(CHATS_DIR, chat["dirName"])
     os.makedirs(d, exist_ok=True)
     write_chat_md(chat)
-    with open(conv_path(chat["dirName"]), "w", encoding="utf-8") as f:
+    p = conv_path(chat["dirName"])
+    with open(p, "w", encoding="utf-8") as f:
         json.dump(chat, f, indent=2)
     with _chat_cache_lock:
         _chat_cache[chat["id"]] = chat
-    settings_dir = os.path.join(d, ".claude")
-    settings_path = os.path.join(settings_dir, "settings.json")
-    if not os.path.exists(settings_path):
-        os.makedirs(settings_dir, exist_ok=True)
-        with open(settings_path, "w", encoding="utf-8") as f:
-            f.write("{}")
+        _chat_cache_mtime[chat["id"]] = os.path.getmtime(p)
+    write_chat_settings(chat)
     git_run("git add -A", cwd=d)
     git_run(f'git commit -m "chat sync" --allow-empty-message -q', cwd=d)
     schedule_s3_sync()
@@ -526,6 +588,7 @@ def list_chats():
                 c = json.load(f)
             with _chat_cache_lock:
                 _chat_cache[c["id"]] = c
+                _chat_cache_mtime[c["id"]] = os.path.getmtime(p)
             chats.append(c)
         except (OSError, json.JSONDecodeError):
             pass
@@ -657,9 +720,16 @@ def run_claude_message(chat_id, user_text):
     if not chat:
         return
     session = get_session(chat_id)
-    if session["running"]:
-        return
-    session["running"] = True
+    with _sessions_lock:
+        # Check-and-set must be atomic: without the lock, two calls for the
+        # same chat (e.g. a WS "input" racing an upload's direct call) can
+        # both see running=False and both spawn a `claude --resume` process
+        # against the SAME session id at once. One of those always loses -
+        # it exits almost immediately with no assistant output at all, which
+        # is exactly the "empty reply" failure this was producing.
+        if session["running"]:
+            return
+        session["running"] = True
     session["start_time"] = time.time()
     if not session["session_id"] and chat.get("sessionId"):
         session["session_id"] = chat["sessionId"]
@@ -673,19 +743,16 @@ def run_claude_message(chat_id, user_text):
         hist_text = "\n\n".join(f"{'User' if m['role'] == 'user' else 'Claude'}: {m['text']}" for m in history)
         prompt = f"[CONTEXT]\n{hist_text}\n\n[MESSAGE]\n{user_text}"
 
-    args = [
-        CLAUDE_BIN, "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose", "--print", "-",
-        # Excessive-agency guardrail: grading never needs the web, sub-agents,
-        # scheduling, or messaging tools, so they're not just discouraged in the
-        # persona, they're not in the built-in tool set at all for this process.
-        "--tools", "Bash,Read,Write,Edit",
-        # Unbounded-consumption guardrail: caps real spend on Samantha's billing
-        # key per message, enforced by the CLI itself, not by the model noticing
-        # it should stop.
-        "--max-budget-usd", "1",
-    ]
-    if session["session_id"]:
-        args += ["--resume", session["session_id"]]
+    # eval_owasp.py stacks ~7 real turns into one resumed session to avoid
+    # cluttering the chat list with one chat per case - real, measured cost
+    # for that (2026-09-24: $0.05-0.09 for a simple refusal turn, up to
+    # $0.26+ for a real grading turn) can exceed the $1 real-user cap well
+    # before the last case runs, failing it with an empty reply rather than
+    # anything the guardrails themselves got wrong. Its chats are always
+    # named "eval-<timestamp>" and always admin-owned - anything else stays
+    # on the real $1 cap, this never loosens it for an actual user.
+    is_eval_chat = chat["dirName"].startswith("eval-") and resolve_owner(chat) == "admin"
+    budget = "3" if is_eval_chat else "1"
 
     files_before = {}
     for f in get_chat_files(chat):
@@ -694,82 +761,209 @@ def run_claude_message(chat_id, user_text):
         except OSError:
             files_before[f] = 0
 
-    try:
-        proc = subprocess.Popen(args, cwd=chat_dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, text=True, bufsize=1, env=agent_env())
-    except Exception as e:
-        session["running"] = False
-        broadcast({"type": "output", "chatId": chat_id, "data": f"[failed to start claude: {e}]"})
-        broadcast({"type": "response_done", "chatId": chat_id})
-        return
-    session["proc"] = proc
+    def _spawn_and_collect():
+        """Launches the CLI once and collects everything about that one
+        attempt. Split out of run_claude_message so a resume that fails
+        because the session file isn't flushed to disk yet (see waiter())
+        can be retried with a brand new process/pipes rather than reusing a
+        proc that has already exited."""
+        args = [
+            CLAUDE_BIN, "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose", "--print", "-",
+            # Excessive-agency guardrail: grading never needs the web, sub-agents,
+            # scheduling, or messaging tools, so they're not just discouraged in the
+            # persona, they're not in the built-in tool set at all for this process.
+            "--tools", "Bash,Read,Write,Edit",
+            # Unbounded-consumption guardrail: caps real spend on Samantha's billing
+            # key per message, enforced by the CLI itself, not by the model noticing
+            # it should stop.
+            "--max-budget-usd", budget,
+        ]
+        if session["session_id"]:
+            args += ["--resume", session["session_id"]]
 
-    response_parts = []
-
-    def write_stdin():
         try:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
-        except Exception:
-            pass
+            proc = subprocess.Popen(args, cwd=chat_dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, text=True, bufsize=1, env=agent_env())
+        except Exception as e:
+            return "", [], {}, e
+        session["proc"] = proc
 
-    threading.Thread(target=write_stdin, daemon=True).start()
+        response_parts = []
+        result_info = {}
+        stderr_lines = []
 
-    def read_stdout():
-        for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
+        def write_stdin():
             try:
-                ev = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if ev.get("type") == "system" and ev.get("subtype") == "init" and ev.get("session_id"):
-                session["session_id"] = ev["session_id"]
-            if ev.get("type") == "assistant":
-                for block in ev.get("message", {}).get("content", []) or []:
-                    if block.get("type") == "text" and block.get("text"):
-                        clean_text = redact(block["text"])
-                        response_parts.append(clean_text)
-                        broadcast({"type": "output", "chatId": chat_id, "data": clean_text})
-                    elif block.get("type") == "tool_use":
-                        broadcast({"type": "tool_use", "chatId": chat_id,
-                                   "text": format_tool_preview(block.get("name", ""), block.get("input") or {})})
-            if ev.get("type") == "result" and ev.get("session_id"):
-                session["session_id"] = ev["session_id"]
+                proc.stdin.write(prompt)
+                proc.stdin.close()
+            except Exception:
+                pass
 
-    reader_thread = threading.Thread(target=read_stdout, daemon=True)
-    reader_thread.start()
+        threading.Thread(target=write_stdin, daemon=True).start()
 
-    def waiter():
+        def read_stdout():
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("type") == "system" and ev.get("subtype") == "init" and ev.get("session_id"):
+                    session["session_id"] = ev["session_id"]
+                if ev.get("type") == "assistant":
+                    for block in ev.get("message", {}).get("content", []) or []:
+                        if block.get("type") == "text" and block.get("text"):
+                            clean_text = redact(block["text"])
+                            response_parts.append(clean_text)
+                            broadcast({"type": "output", "chatId": chat_id, "data": clean_text})
+                        elif block.get("type") == "tool_use":
+                            broadcast({"type": "tool_use", "chatId": chat_id,
+                                       "text": format_tool_preview(block.get("name", ""), block.get("input") or {})})
+                if ev.get("type") == "result":
+                    if ev.get("session_id"):
+                        session["session_id"] = ev["session_id"]
+                    result_info["terminal_reason"] = ev.get("terminal_reason")
+                    result_info["is_error"] = ev.get("is_error")
+
+        reader_thread = threading.Thread(target=read_stdout, daemon=True)
+        reader_thread.start()
+
+        def read_stderr():
+            # Nothing drained this before, ever. On a heavy multi-tool-use turn
+            # (several Bash calls, sudo, psql) that's a real deadlock risk if the
+            # OS pipe buffer fills - the child blocks on write() forever - and
+            # even short of that, it meant any CLI-level failure was completely
+            # invisible: full_text just came back empty with no clue why.
+            try:
+                for line in proc.stderr:
+                    line = line.rstrip("\n")
+                    if line:
+                        stderr_lines.append(line)
+            except Exception:
+                pass
+
+        stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+        stderr_thread.start()
+
         proc.wait()
         reader_thread.join(timeout=5)
-        session["running"] = False
+        stderr_thread.join(timeout=5)
         session["proc"] = None
 
-        fresh = load_chat_by_id(chat_id)
-        full_text = "".join(response_parts).strip()
-        if fresh:
-            chat_dir2 = os.path.join(CHATS_DIR, fresh["dirName"])
-            changed = []
-            for f in get_chat_files(fresh):
-                before = files_before.get(f)
-                try:
-                    after = os.path.getmtime(os.path.join(chat_dir2, f))
-                except OSError:
-                    after = 0
-                if before is None or after > before:
-                    changed.append(f)
-            think_ms = int((time.time() - session["start_time"]) * 1000) if session["start_time"] else 0
-            append_message(fresh, "claude", full_text, changed if changed else None, think_ms)
-            if session["session_id"]:
-                fresh["sessionId"] = session["session_id"]
-                save_chat(fresh)
-            if changed:
-                broadcast({"type": "files_update", "chatId": chat_id, "files": changed})
-                schedule_repo_size()
+        return "".join(response_parts).strip(), stderr_lines, result_info, None
 
-        broadcast({"type": "response_done", "chatId": chat_id})
+    def waiter():
+        # Everything below was previously unguarded: any exception (a bad
+        # git_run, a JSON hiccup, load_chat_by_id failing) would kill this
+        # thread mid-function, BEFORE session["running"] was ever cleared and
+        # BEFORE response_done ever broadcast. The chat would look stuck
+        # forever with zero error surfaced anywhere - the WS client just
+        # hangs until its own timeout. try/finally guarantees the client
+        # always gets a real answer and the session never gets stuck.
+        nonlocal prompt
+        try:
+            full_text, stderr_lines, result_info, spawn_error = _spawn_and_collect()
+
+            # Confirmed live via journalctl: "No conversation found with
+            # session ID: <id>". First guess was a flush-lag race (retry the
+            # same --resume after a short sleep) - disproved live: the SAME
+            # session id failed the SAME way on every retry, and that
+            # project's own .claude/projects/.../*.jsonl directory never had
+            # a file under that id at all. That id is not "not yet on disk
+            # by the time we ask", it never becomes resumable, so retrying
+            # --resume against it is pointless. The only way forward is to
+            # stop resuming it: start a genuinely new session and rebuild
+            # context the same way the very first message of a chat already
+            # does (the [CONTEXT] prefix below), rather than depending on
+            # the CLI's own history for a session it will never find again.
+            if spawn_error is None and not full_text and any(
+                "No conversation found with session ID" in l for l in stderr_lines
+            ):
+                print(f"[run_claude_message] chat {chat_id} session "
+                      f"{session['session_id']} never became resumable; "
+                      f"starting a fresh session with history re-injected as context", flush=True)
+                session["session_id"] = None
+                chat_for_context = load_chat_by_id(chat_id) or chat
+                history = (chat_for_context.get("messages", []) or [])[:-1][-10:]
+                hist_text = "\n\n".join(
+                    f"{'User' if m['role'] == 'user' else 'Claude'}: {m['text']}" for m in history
+                )
+                prompt = f"[CONTEXT]\n{hist_text}\n\n[MESSAGE]\n{user_text}"
+                full_text, stderr_lines, result_info, spawn_error = _spawn_and_collect()
+
+            if spawn_error is not None:
+                broadcast({"type": "output", "chatId": chat_id, "data": f"[failed to start claude: {spawn_error}]"})
+                return
+
+            fresh = load_chat_by_id(chat_id)
+            if not full_text:
+                if result_info.get("terminal_reason") == "budget_exhausted":
+                    # The CLI checks cumulative session spend against
+                    # --max-budget-usd before making any model call, so a
+                    # resumed session that's already over the cap exits
+                    # almost instantly with no assistant text at all -
+                    # silently storing that as a blank reply would look like
+                    # the app just didn't answer. Say what actually happened.
+                    full_text = ("This chat has used its budget for this session. "
+                                  "Start a new chat to continue.")
+                else:
+                    # Any other empty result (CLI crash, killed process, a
+                    # second overlapping --resume losing the race) was
+                    # previously stored as a silent blank "claude" message
+                    # forever. Log the real reason server-side - never
+                    # surface raw stderr to the user, it can contain
+                    # paths/internals this app otherwise redacts - and give
+                    # the chat a real fallback instead of nothing.
+                    if stderr_lines:
+                        print(f"[run_claude_message] chat {chat_id} produced no "
+                              f"assistant output; stderr tail:\n" +
+                              "\n".join(stderr_lines[-20:]), flush=True)
+                    full_text = "Something went wrong generating a response. Please try again."
+            if fresh:
+                chat_dir2 = os.path.join(CHATS_DIR, fresh["dirName"])
+                changed = []
+                for f in get_chat_files(fresh):
+                    before = files_before.get(f)
+                    try:
+                        after = os.path.getmtime(os.path.join(chat_dir2, f))
+                    except OSError:
+                        after = 0
+                    if before is None or after > before:
+                        changed.append(f)
+                think_ms = int((time.time() - session["start_time"]) * 1000) if session["start_time"] else 0
+                append_message(fresh, "claude", full_text, changed if changed else None, think_ms)
+                if session["session_id"]:
+                    fresh["sessionId"] = session["session_id"]
+                    save_chat(fresh)
+                if changed:
+                    broadcast({"type": "files_update", "chatId": chat_id, "files": changed})
+                    schedule_repo_size()
+            else:
+                print(f"[run_claude_message] chat {chat_id} not found by "
+                      f"load_chat_by_id in waiter() - no reply recorded", flush=True)
+        except Exception:
+            import traceback
+            print(f"[run_claude_message] chat {chat_id} waiter() crashed:\n{traceback.format_exc()}", flush=True)
+            try:
+                fallback_chat = load_chat_by_id(chat_id)
+                if fallback_chat:
+                    append_message(fallback_chat, "claude",
+                                    "Something went wrong generating a response. Please try again.")
+            except Exception:
+                pass
+        finally:
+            # Only now - after the response is appended, sessionId
+            # persisted, and CLAUDE.md/git sync from that save has finished
+            # (or we've given up and logged why) - is it safe to let another
+            # run start against this same chat_dir and session id. This used
+            # to flip right after proc.wait(), well before any of that file
+            # I/O was done, which is what let a new --resume race the
+            # previous turn's own save_chat() in the same directory.
+            session["running"] = False
+            session["proc"] = None
+            broadcast({"type": "response_done", "chatId": chat_id})
 
     threading.Thread(target=waiter, daemon=True).start()
 
@@ -791,6 +985,8 @@ def init_chats(app):
                 try:
                     msg = json.loads(raw)
                 except json.JSONDecodeError:
+                    print(f"[ws_route] JSONDecodeError on raw WS payload "
+                          f"(len={len(raw) if raw else 0}): {raw[:200]!r}", flush=True)
                     continue
                 _handle_ws_message(client, msg)
         finally:
@@ -934,6 +1130,7 @@ def init_chats(app):
         _sessions.pop(chat_id, None)
         with _chat_cache_lock:
             _chat_cache.pop(chat_id, None)
+            _chat_cache_mtime.pop(chat_id, None)
         broadcast({"type": "chat_deleted", "chatId": chat_id})
         schedule_repo_size()
         return jsonify({"ok": True})
