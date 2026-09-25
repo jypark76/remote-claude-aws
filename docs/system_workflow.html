@@ -6,134 +6,100 @@
 <style>
   body { margin: 0; padding: 24px; background: #f7f7f5; font-family: -apple-system, sans-serif; }
   .t { font-size: 14px; fill: #1a1a1a; }
-  .th { font-size: 14px; font-weight: 500; fill: #1a1a1a; }
+  .th { font-size: 15px; font-weight: 600; fill: #1a1a1a; }
   .ts { font-size: 12px; fill: #5a5a5a; }
   .box { fill: #ffffff; stroke: #b0b0b0; }
   .arr { stroke: #767676; stroke-width: 1.5; fill: none; }
-  .arr-dash { stroke: #9a8f3e; stroke-width: 1.5; fill: none; stroke-dasharray: 4 3; }
   .c-gray rect { fill: #F1EFE8; stroke: #888780; }
-  .c-purple rect { fill: #EEEDFE; stroke: #7F77DD; }
   .c-teal rect { fill: #E1F5EE; stroke: #1D9E75; }
-  .c-coral rect { fill: #FAECE7; stroke: #D85A30; }
-  .c-gold rect { fill: #FBF3D9; stroke: #9A8F3E; }
-  .c-gray text, .c-purple text, .c-teal text, .c-coral text, .c-gold text { fill: #2C2C2A; }
+  .c-gray text, .c-teal text { fill: #2C2C2A; }
+  .note { font-size: 11px; fill: #9A8F3E; font-style: italic; }
 </style>
 </head>
 <body>
-<svg width="100%" viewBox="0 0 800 700" style="max-width:800px;display:block;margin:0 auto" role="img">
-<title>remote_claude full request workflow, with the OWASP guardrail layer and eval harness</title>
-<desc>A browser's request goes through CloudFront first, then to the EC2 box - the origin's security group only accepts traffic from CloudFront, so the box can no longer be reached directly. Gunicorn (running eventlet workers, so the live websocket connection works) receives it and spawns a Claude Code process for that chat, restricted to four tools (Bash, Read, Write, Edit) and a one-dollar-per-message spend cap, with no other environment variables than its own Anthropic API key. That process asks Amazon Bedrock (or, currently, the direct Claude API while a Bedrock account restriction is unresolved) what to do next, reads and writes files in its own chat folder, whose CLAUDE.md instructions are regenerated fresh from code on every save so the agent can never permanently rewrite its own rules, reaches Postgres only through a root-owned wrapper script invoked via a narrow sudo rule so it never sees the real database credentials, only query results, from a Postgres role that itself cannot delete or truncate anything, and turns text into a similarity-search fingerprint through a small local embedding model, with no database access of its own. Everything the process says passes through an output filter that strips secret values and model-identity strings before it reaches the browser or gets saved. A guest login can view any chat but is blocked, server-side, from ever reaching the Claude Code step at all. Separately, an eval harness outside the running system exercises the live app the same way a real user or attacker would: real chat messages, a real malicious upload, and direct inspection of the EC2 process and the database, checking that every one of these guardrails still holds.</desc>
+<svg width="100%" viewBox="0 0 930 900" style="max-width:930px;display:block;margin:0 auto" role="img">
+<title>remote_claude infrastructure: request path from browser to every managed AWS service it touches</title>
+<desc>A browser's HTTPS request goes to CloudFront's global edge network, then to an Application Load Balancer using sticky sessions, then to one of two EC2 instances in an auto-scaling group spread across two availability zones (min 1, max 3, currently 2 running), each running Flask and spawning Claude Code per chat. From there, the instances reach four managed services directly: Cognito verifies logins, Amazon Bedrock is where the model is meant to live (currently the direct Claude API instead, while an AWS account/billing restriction on Bedrock invoke access is unresolved), EFS holds chat state shared between both instances so a request can land on either one, and Postgres on RDS runs Multi-AZ with a standby. Security groups lock this down hop by hop - CloudFront can only reach the load balancer, the load balancer can only reach the instances, and the instances can only reach the database and EFS, nothing is reachable directly from outside its intended predecessor. Everything still lives in one AWS region - there is no multi-region failover yet.</desc>
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
 
 <g class="c-gray">
-  <rect x="300" y="40" width="200" height="56" rx="4" class="box"/>
-  <text x="400" y="58" text-anchor="middle" class="th">Browser</text>
-  <text x="400" y="76" text-anchor="middle" class="ts">React chat UI</text>
+  <rect x="315" y="40" width="220" height="60" rx="6" class="box"/>
+  <text x="425" y="64" text-anchor="middle" class="th">Browser</text>
+  <text x="425" y="83" text-anchor="middle" class="ts">React chat UI</text>
 </g>
-
-<line x1="400" y1="96" x2="400" y2="130" class="arr" marker-end="url(#arrow)"/>
-
-<g class="c-teal">
-  <rect x="300" y="130" width="200" height="56" rx="4" class="box"/>
-  <text x="400" y="148" text-anchor="middle" class="th">CloudFront</text>
-  <text x="400" y="166" text-anchor="middle" class="ts">d1qjlzxncy7kb2.cloudfront.net</text>
-</g>
-
-<line x1="400" y1="186" x2="400" y2="236" class="arr" marker-end="url(#arrow)"/>
-<text x="514" y="212" text-anchor="middle" class="ts">origin locked down —</text>
-<text x="514" y="226" text-anchor="middle" class="ts">only CloudFront can reach it</text>
-
-<rect x="190" y="212" width="420" height="300" rx="8" fill="none" stroke="#b0b0b0" stroke-width="1" stroke-dasharray="4 3"/>
-<text x="206" y="228" class="ts">EC2 server — one machine</text>
+<line x1="425" y1="100" x2="425" y2="140" class="arr" marker-end="url(#arrow)"/>
+<text x="580" y="123" text-anchor="middle" class="ts">HTTPS request</text>
 
 <g class="c-gray">
-  <rect x="300" y="242" width="200" height="56" rx="4" class="box"/>
-  <text x="400" y="260" text-anchor="middle" class="th">Flask, via gunicorn</text>
-  <text x="400" y="278" text-anchor="middle" class="ts">spawns a minimal, explicit env</text>
+  <rect x="315" y="140" width="220" height="60" rx="6" class="box"/>
+  <text x="425" y="164" text-anchor="middle" class="th">CloudFront</text>
+  <text x="425" y="183" text-anchor="middle" class="ts">global edge network</text>
+</g>
+<line x1="425" y1="200" x2="425" y2="240" class="arr" marker-end="url(#arrow)"/>
+<text x="570" y="223" text-anchor="middle" class="ts">sticky session</text>
+
+<g class="c-gray">
+  <rect x="315" y="240" width="220" height="60" rx="6" class="box"/>
+  <text x="425" y="264" text-anchor="middle" class="th">Load Balancer</text>
+  <text x="425" y="283" text-anchor="middle" class="ts">ALB &#8212; sticky sessions</text>
 </g>
 
-<line x1="400" y1="298" x2="400" y2="338" class="arr" marker-end="url(#arrow)"/>
-<text x="514" y="322" text-anchor="middle" class="ts">per chat</text>
+<rect x="190" y="330" width="620" height="120" rx="8" fill="none" stroke="#b0b0b0" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="206" y="348" class="ts">Auto-scaling group &#8212; 2 AZs (min 1, max 3, currently 2 running)</text>
 
-<g class="c-purple">
-  <rect x="300" y="338" width="200" height="56" rx="4" class="box"/>
-  <text x="400" y="356" text-anchor="middle" class="th">Claude Code</text>
-  <text x="400" y="374" text-anchor="middle" class="ts">Bash/Read/Write/Edit only · $1 cap</text>
+<line x1="425" y1="300" x2="290" y2="365" class="arr" marker-end="url(#arrow)"/>
+<line x1="425" y1="300" x2="560" y2="365" class="arr" marker-end="url(#arrow)"/>
+
+<g class="c-gray">
+  <rect x="220" y="365" width="220" height="66" rx="6" class="box"/>
+  <text x="330" y="391" text-anchor="middle" class="th">EC2 (AZ-1)</text>
+  <text x="330" y="410" text-anchor="middle" class="ts">Flask + Claude Code</text>
 </g>
 
-<path d="M340 394 L340 414 L95 414 L95 430" class="arr" marker-end="url(#arrow)"/>
-<text x="220" y="406" text-anchor="middle" class="ts">asks a question</text>
+<g class="c-gray">
+  <rect x="490" y="365" width="220" height="66" rx="6" class="box"/>
+  <text x="600" y="391" text-anchor="middle" class="th">EC2 (AZ-2)</text>
+  <text x="600" y="410" text-anchor="middle" class="ts">Flask + Claude Code</text>
+</g>
 
-<path d="M380 394 L380 414 L300 414 L300 430" class="arr" marker-end="url(#arrow)"/>
-<text x="345" y="418" text-anchor="middle" class="ts">reads / writes</text>
-
-<path d="M420 394 L420 414 L500 414 L500 430" class="arr" marker-end="url(#arrow)"/>
-<text x="475" y="406" text-anchor="middle" class="ts">runs SQL</text>
+<path d="M330 431 L330 470 L145 470 L145 505" class="arr" marker-end="url(#arrow)"/>
+<path d="M330 431 L330 470 L360 470 L360 505" class="arr" marker-end="url(#arrow)"/>
+<path d="M600 431 L600 470 L580 470 L580 505" class="arr" marker-end="url(#arrow)"/>
+<path d="M600 431 L600 470 L790 470 L790 505" class="arr" marker-end="url(#arrow)"/>
 
 <g class="c-teal">
-  <rect x="10" y="430" width="170" height="56" rx="4" class="box"/>
-  <text x="95" y="448" text-anchor="middle" class="th">Amazon Bedrock</text>
-  <text x="95" y="466" text-anchor="middle" class="ts">AI model lives here</text>
+  <rect x="40" y="505" width="210" height="66" rx="6" class="box"/>
+  <text x="145" y="531" text-anchor="middle" class="th">Cognito</text>
+  <text x="145" y="550" text-anchor="middle" class="ts">verifies login</text>
 </g>
-<text x="95" y="500" text-anchor="middle" class="ts" fill="#D85A30">
-  <tspan x="95" dy="0">* intended design, currently</tspan>
-  <tspan x="95" dy="14">the direct API instead —</tspan>
-  <tspan x="95" dy="14">re-verified today, invoke</tspan>
-  <tspan x="95" dy="14">still blocked account-wide</tspan>
+
+<g class="c-teal">
+  <rect x="255" y="505" width="210" height="66" rx="6" class="box"/>
+  <text x="360" y="531" text-anchor="middle" class="th">Amazon Bedrock</text>
+  <text x="360" y="550" text-anchor="middle" class="ts">AI model lives here</text>
+</g>
+<text x="360" y="592" text-anchor="middle" class="note">
+  <tspan x="360" dy="0">* intended design &#8212; currently on the</tspan>
+  <tspan x="360" dy="14">direct Claude API instead, while an</tspan>
+  <tspan x="360" dy="14">AWS account/billing issue with Bedrock</tspan>
+  <tspan x="360" dy="14">gets sorted out</tspan>
 </text>
 
-<g class="c-gray">
-  <rect x="210" y="430" width="180" height="56" rx="4" class="box"/>
-  <text x="300" y="448" text-anchor="middle" class="th">Local chat folder</text>
-  <text x="300" y="466" text-anchor="middle" class="ts">CLAUDE.md rebuilt fresh each save</text>
+<g class="c-teal">
+  <rect x="475" y="505" width="210" height="66" rx="6" class="box"/>
+  <text x="580" y="531" text-anchor="middle" class="th">EFS</text>
+  <text x="580" y="550" text-anchor="middle" class="ts">shared chat state</text>
 </g>
-
-<g class="c-gold">
-  <rect x="410" y="430" width="180" height="56" rx="4" class="box"/>
-  <text x="500" y="448" text-anchor="middle" class="th">grading_query.sh</text>
-  <text x="500" y="466" text-anchor="middle" class="ts">sudo-gated · root-only creds</text>
-</g>
-
-<line x1="590" y1="458" x2="616" y2="458" class="arr" marker-end="url(#arrow)"/>
 
 <g class="c-teal">
-  <rect x="620" y="430" width="170" height="56" rx="4" class="box"/>
-  <text x="705" y="448" text-anchor="middle" class="th">Postgres (RDS)</text>
-  <text x="705" y="466" text-anchor="middle" class="ts">grading_app · no DELETE</text>
+  <rect x="690" y="505" width="210" height="66" rx="6" class="box"/>
+  <text x="795" y="531" text-anchor="middle" class="th">Postgres (RDS)</text>
+  <text x="795" y="550" text-anchor="middle" class="ts">Multi-AZ + standby</text>
 </g>
 
-<line x1="300" y1="486" x2="300" y2="530" class="arr" marker-end="url(#arrow)"/>
-<text x="315" y="510" class="ts">aws s3 sync, 5s after save</text>
-
-<g class="c-coral">
-  <rect x="210" y="530" width="180" height="56" rx="4" class="box"/>
-  <text x="300" y="548" text-anchor="middle" class="th">S3 backup</text>
-  <text x="300" y="566" text-anchor="middle" class="ts">survives EC2 loss</text>
-</g>
-
-<path d="M460 394 L460 414 L520 414 L520 530" class="arr" marker-end="url(#arrow)"/>
-<text x="600" y="510" text-anchor="middle" class="ts">turns text into a fingerprint</text>
-
-<g class="c-coral">
-  <rect x="430" y="530" width="180" height="56" rx="4" class="box"/>
-  <text x="520" y="548" text-anchor="middle" class="th">embed_text.py</text>
-  <text x="520" y="566" text-anchor="middle" class="ts">local model &#183; no DB access</text>
-</g>
-
-<text x="400" y="602" text-anchor="middle" class="ts">every reply also passes through an output filter (strips secrets, model identity) before reaching the browser or being saved</text>
-
-<g class="c-gold">
-  <rect x="620" y="40" width="170" height="80" rx="4" class="box" stroke-dasharray="4 3"/>
-  <text x="705" y="60" text-anchor="middle" class="th">Eval harness</text>
-  <text x="705" y="78" text-anchor="middle" class="ts">runs outside the app,</text>
-  <text x="705" y="92" text-anchor="middle" class="ts">real requests only</text>
-  <text x="705" y="106" text-anchor="middle" class="ts">(chat / structural / DB)</text>
-</g>
-<path d="M705 120 L705 145 L500 145 L500 232" class="arr-dash" marker-end="url(#arrow)"/>
-<path d="M760 120 L760 458 L790 458" class="arr-dash" marker-end="url(#arrow)"/>
-
-<text x="400" y="632" text-anchor="middle" class="ts">gray = EC2 plumbing · purple = the agent · teal = external services</text>
-<text x="400" y="648" text-anchor="middle" class="ts">gold = the OWASP guardrail layer · dashed gold = the eval harness, checking all of it</text>
+<text x="465" y="680" text-anchor="middle" class="ts">Hop-by-hop lockdown: CloudFront &#8594; LB only &#183; LB &#8594; instances only &#183; instances &#8594; DB / EFS only</text>
+<text x="465" y="704" text-anchor="middle" class="note">Still one AWS region &#8212; no multi-region failover yet</text>
+<text x="465" y="736" text-anchor="middle" class="ts">gray = compute layer (LB, EC2) &#183; teal = managed AWS services</text>
 </svg>
 </body>
 </html>
