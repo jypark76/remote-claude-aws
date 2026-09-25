@@ -79,9 +79,22 @@ def safe_filename(name):
     return name
 
 
+MAX_MESSAGE_CHARS = 8000
+MAX_HISTORY_MESSAGES = 20  # sent to Claude; the full history still gets saved below
+
+
 def handle_chat(username, body):
     user_message = body.get("message", "")
     chat_id = body.get("chat_id")
+
+    # Unlike the EC2 app (--max-budget-usd caps real spend at the CLI level),
+    # nothing here bounded cost at all: a single oversized message, or a
+    # long-running chat's ever-growing history resent in full on every turn,
+    # both translate directly into unbounded Anthropic API spend. Not live
+    # traffic today (this isn't deployed), but exactly the kind of gap that
+    # is easy to miss when it does go live again.
+    if len(user_message) > MAX_MESSAGE_CHARS:
+        return {"error": f"message too long (max {MAX_MESSAGE_CHARS} characters)"}, 400
 
     item = table.get_item(Key={"chat_id": chat_id}).get("Item") if chat_id else None
     if item and item.get("owner") != username and username != "admin":
@@ -91,7 +104,7 @@ def handle_chat(username, body):
         chat_id = str(uuid.uuid4())
 
     history.append({"role": "user", "content": user_message})
-    reply_text = call_claude(history)
+    reply_text = call_claude(history[-MAX_HISTORY_MESSAGES:])
     history.append({"role": "assistant", "content": reply_text})
 
     table.put_item(Item={

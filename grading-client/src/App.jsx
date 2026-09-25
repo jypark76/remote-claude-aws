@@ -15,17 +15,6 @@ function decodeUsername(token) {
   const payload = decodeClaims(token);
   return payload ? payload["cognito:username"] || payload.username || "" : "";
 }
-function getStoredToken() {
-  const token = localStorage.getItem("userToken");
-  if (!token) return null;
-  const claims = decodeClaims(token);
-  if (!claims || !claims.exp || claims.exp * 1000 <= Date.now()) {
-    localStorage.removeItem("userToken");
-    return null;
-  }
-  return token;
-}
-
 async function api(path, token, opts = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     ...opts,
@@ -1133,12 +1122,17 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
 
 // ---------------- App ----------------
 export default function App() {
-  const [token, setToken] = useState(getStoredToken);
+  // Deliberately in-memory only, not localStorage - a JWT sitting in
+  // localStorage is readable by any script on the page, so any future XSS
+  // (even from a compromised dependency) becomes full session theft instead
+  // of nothing. The tradeoff is a fresh login on every page reload; that's
+  // the right side of that tradeoff for a grading tool with student PII in
+  // it.
+  const [token, setToken] = useState(null);
   const [view, setView] = useState({ screen: "list" });
   const socket = useSocket();
 
   function handleLogin(newToken) {
-    localStorage.setItem("userToken", newToken);
     setToken(newToken);
   }
 
@@ -1148,7 +1142,6 @@ export default function App() {
   const role = username === "admin" ? "admin" : username === "guest" ? "guest" : "user";
 
   function logout() {
-    localStorage.removeItem("userToken");
     setToken(null);
     setView({ screen: "list" });
   }

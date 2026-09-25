@@ -25,6 +25,13 @@ async def handler(ws):
     if not token or not role:
         await ws.close(4000, "missing params")
         return
+    # A room IS its token - this is the only access control the relay has.
+    # Rejecting short tokens is a cheap backstop against a hardcoded literal
+    # like the old "test" default ever working again, here or in whatever
+    # client connects to this relay.
+    if len(token) < 20:
+        await ws.close(4001, "token too short - use a real generated token, not a literal")
+        return
 
     room = get_room(token)
 

@@ -7,10 +7,27 @@ Run: python host_agent.py
 import asyncio
 import json
 import os
+import secrets
 import websockets
 
 CLAUDE = r"C:\Users\jypar\.local\bin\claude.exe"
-RELAY_URL = "ws://localhost:3580/?token=test&role=host"
+
+# The relay's own room model has no real access control of its own - a room
+# IS its token, so whoever knows the token can join it. The hardcoded
+# token=test this used to send meant ANY client that also hardcoded "test"
+# (as test_client.py did) landed in the SAME room automatically - not a
+# secret, a public literal sitting in checked-in source. Since this agent
+# spawns `claude --dangerously-skip-permissions` with full local access,
+# whoever can join the room can run arbitrary commands on this machine.
+# Currently harmless only because the relay binds to localhost - if this
+# ever points at a real, non-local relay, a real secret is the only thing
+# standing in the way. RELAY_TOKEN lets you pin a known value (e.g. to
+# match what you've told a specific client out of band); otherwise a fresh
+# unguessable one is generated and printed here each run - never reuse a
+# hardcoded literal.
+RELAY_TOKEN = os.environ.get("RELAY_TOKEN") or secrets.token_urlsafe(24)
+print(f"relay token for this session: {RELAY_TOKEN}")
+RELAY_URL = f"ws://localhost:3580/?token={RELAY_TOKEN}&role=host"
 
 session_id = None  # lets Claude resume the same conversation across messages
 

@@ -1000,9 +1000,18 @@ def init_chats(app):
             # joined its chatId - without this check, anyone who could
             # reach /ws and knew or guessed a chat's UUID could silently
             # listen in on a real grading session with no login at all.
-            if not verify_token_or_none(msg.get("userToken")):
+            # Login alone used to be enough to join ANY chat's stream, not
+            # just your own - the same IDOR the REST read routes had before
+            # _require_can_view. Guests stay exempt on purpose: watching a
+            # live stream is exactly what the guest role is for.
+            claims = verify_token_or_none(msg.get("userToken"))
+            if not claims:
                 return
-            client.chat_id = msg.get("chatId")
+            chat_id = msg.get("chatId")
+            chat = load_chat_by_id(chat_id) if chat_id else None
+            if chat and role_for(claims) not in ("admin", "guest") and resolve_owner(chat) != username_from_claims(claims):
+                return
+            client.chat_id = chat_id
         elif mtype == "input":
             claims = verify_token_or_none(msg.get("userToken"))
             if not claims:
@@ -1024,6 +1033,22 @@ def init_chats(app):
 
     def _require_owner_or_admin(chat):
         if g.role != "admin" and resolve_owner(chat) != g.username:
+            return jsonify({"error": "Forbidden"}), 403
+        return None
+
+    def _require_can_view(chat):
+        """Read-side counterpart to _require_owner_or_admin. Every write
+        route already checked ownership; every read route only checked
+        @require_auth (any valid login, any chat by id) - a real IDOR, since
+        chat_id is the only thing standing between one account and another
+        user's full history/files. Guests are deliberately exempt: their
+        whole purpose is viewing chats (see the WS "input" handler's guest
+        message) - restricting them here would break the actual product,
+        not just close a gap. What this closes is a regular non-owner,
+        non-admin, non-guest account reading someone else's private chat."""
+        if g.role in ("admin", "guest"):
+            return None
+        if resolve_owner(chat) != g.username:
             return jsonify({"error": "Forbidden"}), 403
         return None
 
@@ -1082,6 +1107,9 @@ def init_chats(app):
         chat = load_chat_by_id(chat_id)
         if not chat:
             return jsonify({"error": "not found"}), 404
+        err = _require_can_view(chat)
+        if err:
+            return err
         sess = _sessions.get(chat_id, {})
         return jsonify({**chat, "ownerId": resolve_owner(chat), "isRunning": bool(sess.get("running")),
                         "runStartTime": sess.get("start_time")})
@@ -1152,6 +1180,9 @@ def init_chats(app):
         chat = load_chat_by_id(chat_id)
         if not chat:
             return jsonify({"error": "not found"}), 404
+        err = _require_can_view(chat)
+        if err:
+            return err
         chat_dir = os.path.join(CHATS_DIR, chat["dirName"])
         buf = BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1170,6 +1201,9 @@ def init_chats(app):
         chat = load_chat_by_id(chat_id)
         if not chat:
             return jsonify({"error": "not found"}), 404
+        err = _require_can_view(chat)
+        if err:
+            return err
         return jsonify({"pinned": chat.get("pinnedFiles", []), "available": get_chat_items(chat)})
 
     @app.post("/api/chats/<chat_id>/pins")
@@ -1210,6 +1244,9 @@ def init_chats(app):
         chat = load_chat_by_id(chat_id)
         if not chat:
             return jsonify({"error": "not found"}), 404
+        err = _require_can_view(chat)
+        if err:
+            return err
         return jsonify(get_chat_files(chat))
 
     @app.get("/api/chats/<chat_id>/files/<path:filename>")
@@ -1218,6 +1255,9 @@ def init_chats(app):
         chat = load_chat_by_id(chat_id)
         if not chat:
             return jsonify({"error": "not found"}), 404
+        err = _require_can_view(chat)
+        if err:
+            return err
         chat_dir = os.path.realpath(os.path.join(CHATS_DIR, chat["dirName"]))
         full = os.path.realpath(os.path.join(chat_dir, filename))
         if not full.startswith(chat_dir) or not os.path.isfile(full):
@@ -1350,14 +1390,25 @@ def init_chats(app):
         )
         return [r[0] for r in rows]
 
+    # These three routes read the raw database directly - every submission's
+    # student_name and text, across every user's chats, in one call for
+    # /export. @require_auth alone used to be the only gate, letting a
+    # regular non-admin, non-guest account (if one existed) pull the whole
+    # database too - that's the actual gap. Guests are meant to have broad
+    # read access (same as chat viewing), so they're allowed here on
+    # purpose, not by oversight; only a plain "user" role is blocked.
     @app.get("/api/tables")
     @require_auth
     def api_list_tables():
+        if g.role not in ("admin", "guest"):
+            return jsonify({"error": "Forbidden"}), 403
         return jsonify({"tables": list_table_names()})
 
     @app.get("/api/tables/export")
     @require_auth
     def api_export_tables():
+        if g.role not in ("admin", "guest"):
+            return jsonify({"error": "Forbidden"}), 403
         buf = StringIO()
         writer = csv.writer(buf)
         for table in list_table_names():
@@ -1381,6 +1432,8 @@ def init_chats(app):
     @app.get("/api/tables/<table_name>")
     @require_auth
     def api_table_rows(table_name):
+        if g.role not in ("admin", "guest"):
+            return jsonify({"error": "Forbidden"}), 403
         # Validate against the real table list before ever using table_name
         # in a query - it comes straight from the URL, so this is the only
         # thing standing between it and a SQL identifier position.
