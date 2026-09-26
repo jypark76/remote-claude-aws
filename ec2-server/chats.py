@@ -3,6 +3,13 @@ upload/download, live streaming of the Claude Code CLI over WebSocket,
 git sync, storage tracking, pins, cleanup, and export.
 CLAUDE.md is regenerated fresh from code on every save - no agent-writable
 memory file, state lives only in Postgres, queried fresh each time."""
+# In plain English: this is the biggest, most important file in the whole
+# app. It's the "brain" behind every chat. When you type a message, this
+# file is what saves it, hands it to the real Claude Code AI, streams the
+# AI's reply back to your screen live (word by word), and saves the AI's
+# answer too. It also runs the little database-browsing pages, file
+# uploads/downloads, and all the login/permission checks (who's allowed to
+# see or delete what).
 import csv
 import json
 import os
@@ -30,6 +37,10 @@ _PSET_PREFIX = (
 )
 
 
+# In plain English: sends a "just looking, not changing anything" question
+# to the database and hands back the answer as a simple table (column
+# names + rows of text). Used by the little database-browser page in the
+# app, and nowhere that changes data.
 def run_readonly_query(sql):
     """Runs a read-only query through the SAME sudo-gated wrapper script the
     grading AI itself uses (grading_app role - SELECT only in practice here,
@@ -79,6 +90,11 @@ HIDDEN_FILES = {"conversation.json", "CLAUDE.md"}
 ESSENTIAL_ITEMS = {"conversation.json", "CLAUDE.md", ".claude"}
 
 
+# In plain English: builds a short, deliberately bare-bones list of
+# settings to hand to the AI process when it starts up - basically "here's
+# the bare minimum you need to run, and nothing else." Keeping this list
+# short is a safety choice: the AI can only ever leak or misuse a setting
+# if that setting was handed to it in the first place.
 def agent_env():
     """Environment for the spawned Claude Code CLI process. Deliberately excludes
     DB_HOST/DB_USER/DB_PASSWORD - the agent reaches the database only through
@@ -96,6 +112,9 @@ def agent_env():
 _SECRET_PATTERNS = None
 
 
+# In plain English: builds a list of "things that should never show up on
+# screen" - the real API key, and text patterns that look like an internal
+# model name. Built once and reused, not rebuilt every time.
 def _secret_patterns():
     global _SECRET_PATTERNS
     if _SECRET_PATTERNS is None:
@@ -110,6 +129,9 @@ def _secret_patterns():
     return _SECRET_PATTERNS
 
 
+# In plain English: a "censor pass" over any text the AI writes before it
+# reaches the screen or gets saved. If the API key or a model name/version
+# accidentally shows up in the reply, this blanks it out first.
 def redact(text):
     """Strips secret values and model-identity strings from anything about to be
     shown to a user or saved to chat history, regardless of why the model said
@@ -134,6 +156,10 @@ _INJECTION_PHRASES = [
 ]
 
 
+# In plain English: a quick "does this look like someone trying to trick
+# the AI grader?" check - scans for obvious phrases like "ignore the
+# rubric" or "give this full marks" hidden inside a student's submission.
+# It's a tripwire for the lazy/obvious attempts, not a complete defense.
 def scan_for_injection(text):
     """Best-effort detector for the obvious, lazy prompt-injection attempts in
     submitted content. This does not solve prompt injection - a determined
@@ -163,6 +189,14 @@ MIME = {
 
 os.makedirs(CHATS_DIR, exist_ok=True)
 
+# In plain English: this is the AI's "job description" - one long block of
+# instructions that gets handed to the AI at the start of every grading
+# chat. It tells the AI things like: how to look up an assignment, how to
+# grade a submission, what NOT to reveal (its own settings, the database
+# password), how to handle someone trying to trick it, and exactly which
+# special marker words to end its replies with so the website knows to
+# show "Approve/Reject" buttons, etc. It's just text/instructions, not
+# code that runs - think of it as the AI's employee handbook.
 def grading_persona(owner_username):
     return f"""
 ## Your role: Assessment Grading Assistant
@@ -327,6 +361,8 @@ you actual feedback (which may include an attached file) do you record it and re
 workflow above.
 """
 
+# In plain English: the very first message a brand-new chat shows,
+# before you've typed anything - just a friendly "here's what I can do."
 GREETING_TEXT = """Hi! I'm your AI Assessment Grader — I grade student submissions against a rubric, learn from past graded examples, and keep a full history of every grading attempt so instructors can review, approve, or send work back with feedback.
 
 What would you like to do?
@@ -339,6 +375,8 @@ What would you like to do?
 
 Just tell me which one, or describe what you need."""
 
+# In plain English: the instructions given to an ADMIN's chat - basically
+# "you can access the whole computer, not just this one chat's folder."
 BASE_CLAUDE_MD = """# remote_claude Chat Environment
 
 You are running inside remote_claude, a system that connects Claude Code to the user's browser.
@@ -352,6 +390,10 @@ relative path. Tell the user it will appear in the chat automatically.
 Files the user uploads are saved in this directory and can be read by name.
 """
 
+# In plain English: the instructions given to a REGULAR (non-admin) user's
+# chat - the opposite of the admin version. It locks the AI to that one
+# chat's own folder only, so a regular user's chat can never peek at
+# someone else's files or the rest of the server.
 BASE_USER_CLAUDE_MD = """# remote_claude Chat Environment
 
 You are running inside remote_claude, a system that connects Claude Code to the user's browser.
@@ -372,6 +414,9 @@ _repo_size_ts = 0
 _repo_size_lock = threading.Lock()
 
 
+# In plain English: adds up the size of every file inside a folder
+# (including folders-within-folders), like right-clicking a folder and
+# checking "Properties" to see how big it is.
 def _walk_size(d):
     total = 0
     try:
@@ -388,6 +433,9 @@ def _walk_size(d):
     return total
 
 
+# In plain English: kicks off a "how much disk space is being used?"
+# check in the background, so the storage number shown in the app stays
+# roughly up to date without slowing anything else down.
 def schedule_repo_size():
     def run():
         global _repo_size_bytes, _repo_size_ts
@@ -403,6 +451,9 @@ _s3_sync_timer = None
 _s3_sync_lock = threading.Lock()
 
 
+# In plain English: copies every chat's files up to Amazon S3 (a backup
+# storage service), so if this server ever got wiped out, nothing would
+# actually be lost - it's the safety-net backup.
 def _run_s3_sync():
     try:
         subprocess.run(
@@ -413,6 +464,9 @@ def _run_s3_sync():
         print(f"[s3_sync] failed: {e}")
 
 
+# In plain English: "back this up in 5 seconds" - waits a few seconds
+# after the last change before actually backing up, so 10 rapid edits in a
+# row trigger one backup instead of ten.
 def schedule_s3_sync():
     global _s3_sync_timer
     with _s3_sync_lock:
@@ -429,11 +483,16 @@ _chat_cache_mtime = {}
 _chat_cache_lock = threading.Lock()
 
 
+# In plain English: turns a chat's title (which could have spaces,
+# capital letters, emoji, anything) into a safe, plain folder name -
+# e.g. "My Cool Chat!" becomes "my-cool-chat".
 def sanitize_name(title):
     s = re.sub(r"[^a-z0-9]+", "-", title.strip().lower()).strip("-")[:50]
     return s or "chat"
 
 
+# In plain English: if a folder name is already taken, adds -1, -2, etc.
+# until it finds one that's free - so two chats never overwrite each other.
 def unique_dir_name(base):
     name, i = base, 1
     while os.path.exists(os.path.join(CHATS_DIR, name)):
@@ -442,20 +501,29 @@ def unique_dir_name(base):
     return name
 
 
+# In plain English: gives the full file path to one chat's saved
+# conversation (its message history), given the chat's folder name.
 def conv_path(dir_name):
     return os.path.join(CHATS_DIR, dir_name, "conversation.json")
 
 
+# In plain English: figures out who owns a chat (defaults to "admin" for
+# old chats that predate the "who owns this" field).
 def resolve_owner(chat):
     return chat.get("ownerId") or "admin"
 
 
+# In plain English: lists every chat folder that currently exists on disk.
 def all_chat_dirs():
     if not os.path.isdir(CHATS_DIR):
         return []
     return [d for d in os.listdir(CHATS_DIR) if os.path.isdir(os.path.join(CHATS_DIR, d))]
 
 
+# In plain English: given a chat's ID, loads that chat's full saved data
+# (its messages, title, owner, etc.). Checks an in-memory shortcut first
+# (fast) before falling back to actually reading the file off disk (slower
+# but always correct) if the shortcut might be stale.
 def load_chat_by_id(chat_id):
     with _chat_cache_lock:
         cached = _chat_cache.get(chat_id)
@@ -501,6 +569,10 @@ def load_chat_by_id(chat_id):
     return None
 
 
+# In plain English: assembles the full "instructions document" for one
+# specific chat - the right base rules (admin vs. regular user) plus the
+# grading job description plus a list of any files this chat has
+# specifically pinned for the AI to always keep in mind.
 def chat_claude_md(chat):
     owner = resolve_owner(chat)
     base = (BASE_CLAUDE_MD if owner == "admin" else BASE_USER_CLAUDE_MD) + grading_persona(owner)
@@ -510,6 +582,8 @@ def chat_claude_md(chat):
     return base
 
 
+# In plain English: writes that chat's "instructions document" to an
+# actual file (CLAUDE.md) that the AI reads before it does anything.
 def write_chat_md(chat):
     """Always regenerates the persona fresh from code, so a fix made here
     reaches every existing chat on its next save, not just new ones. There is
@@ -525,6 +599,11 @@ def write_chat_md(chat):
 PATH_GUARD_HOOK = "/home/ec2-user/hooks/path_guard.py"
 
 
+# In plain English: writes the ACTUAL enforced version of "stay in your
+# own folder" for regular users - not just a written instruction the AI is
+# trusted to follow, but a real guard-rail file the system checks every
+# single time the AI tries to read/write/run anything, and blocks it if it
+# tries to step outside its own chat's folder.
 def write_chat_settings(chat):
     """Standard-user chats get their CLAUDE.md's 'HARD SECURITY RESTRICTION'
     backed by an actual PreToolUse hook, not just the model's own compliance -
@@ -561,6 +640,10 @@ def write_chat_settings(chat):
         json.dump(settings, f, indent=2)
 
 
+# In plain English: saves everything about a chat to disk - its message
+# history, its instructions file, its security settings - and then keeps a
+# little history log (via git) and kicks off the S3 backup. This is the
+# one function almost everything else calls whenever a chat changes.
 def save_chat(chat):
     d = os.path.join(CHATS_DIR, chat["dirName"])
     os.makedirs(d, exist_ok=True)
@@ -577,6 +660,8 @@ def save_chat(chat):
     schedule_s3_sync()
 
 
+# In plain English: loads every chat that exists, newest-updated first -
+# this is what powers the chat list you see on the left side of the app.
 def list_chats():
     chats = []
     for d in all_chat_dirs():
@@ -596,6 +681,8 @@ def list_chats():
     return chats
 
 
+# In plain English: adds one new message (from you or from the AI) onto
+# the end of a chat's history, then saves the whole chat.
 def append_message(chat, role, text, files=None, think_ms=None):
     entry = {"role": role, "text": text, "ts": int(time.time() * 1000)}
     if files:
@@ -607,6 +694,9 @@ def append_message(chat, role, text, files=None, think_ms=None):
     save_chat(chat)
 
 
+# In plain English: lists the "real" files in a chat's folder (uploads,
+# things the AI created) - hides the internal bookkeeping files
+# (conversation.json, CLAUDE.md) since those aren't meant to be shown.
 def get_chat_files(chat):
     d = os.path.join(CHATS_DIR, chat["dirName"])
     try:
@@ -615,6 +705,9 @@ def get_chat_files(chat):
         return []
 
 
+# In plain English: like get_chat_files, but also includes folders (not
+# just files), and hides a slightly different set of internal-only items.
+# Used for the "pin a file" picker.
 def get_chat_items(chat):
     d = os.path.join(CHATS_DIR, chat["dirName"])
     items = []
@@ -628,6 +721,8 @@ def get_chat_items(chat):
     return items
 
 
+# In plain English: reads the saved order you last dragged your chat list
+# into (which chat is on top, etc.).
 def load_order():
     try:
         with open(ORDER_FILE, "r", encoding="utf-8") as f:
@@ -636,12 +731,17 @@ def load_order():
         return []
 
 
+# In plain English: saves the chat list's order after you reorder it.
 def save_order(ids):
     with open(ORDER_FILE, "w", encoding="utf-8") as f:
         json.dump(ids, f)
 
 
 # ---------------- git ----------------
+# In plain English: runs one git (version-history) command inside a
+# chat's folder, and just logs a warning if it fails instead of crashing
+# anything - git history here is a nice-to-have, not something that should
+# ever take the whole chat down if it hiccups.
 def git_run(cmd, cwd):
     try:
         subprocess.run(cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE,
@@ -650,6 +750,8 @@ def git_run(cmd, cwd):
         print(f"[git_run] {cmd!r} in {cwd!r} failed: {e}")
 
 
+# In plain English: turns a brand-new chat folder into a git-tracked
+# folder (like turning on "track changes"), if it isn't one already.
 def ensure_git_repo(d):
     if not os.path.isdir(os.path.join(d, ".git")):
         git_run("git init -q", cwd=d)
@@ -662,6 +764,9 @@ _ws_clients = set()
 _ws_clients_lock = threading.Lock()
 
 
+# In plain English: represents one open "live connection" from someone's
+# browser (a tab that's currently watching a chat). Remembers which chat
+# it's watching and knows how to safely send it a message.
 class WSClient:
     def __init__(self, ws):
         self.ws = ws
@@ -676,6 +781,10 @@ class WSClient:
                 pass
 
 
+# In plain English: sends a live update (like "the AI just typed this
+# word") out to every browser tab that's currently watching that specific
+# chat - this is what makes replies appear on screen in real time instead
+# of only after the AI finishes.
 def broadcast(msg):
     with _ws_clients_lock:
         targets = [c for c in _ws_clients if c.chat_id == msg.get("chatId")]
@@ -684,6 +793,9 @@ def broadcast(msg):
 
 
 # ---------------- tool preview formatting ----------------
+# In plain English: turns "the AI just ran a tool" into a short, readable
+# one-line summary to flash on screen, e.g. Bash(ls -la) or Read(notes.txt)
+# instead of a big wall of raw technical detail.
 def format_tool_preview(name, tool_input):
     def short(s):
         return re.sub(r"\s+", " ", (s or "")).strip()[:60]
@@ -710,17 +822,31 @@ _sessions = {}
 _sessions_lock = threading.Lock()
 
 
+# In plain English: gets (or creates, the first time) the little tracking
+# card for one chat - is it currently running a reply right now, which AI
+# "conversation" is it resumed from, etc.
 def get_session(chat_id):
     with _sessions_lock:
         return _sessions.setdefault(chat_id, {"session_id": None, "running": False, "proc": None, "start_time": None})
 
 
+# In plain English: this is the single most important function in the
+# whole app. It's what actually happens when you send a message: it starts
+# up the real Claude Code AI as its own little program, feeds it your
+# message, listens to everything it says back (streaming it to your screen
+# live, word by word), waits for it to finish, then saves its final answer
+# to the chat. It also handles the AI's process crashing, timing out, or
+# hitting its spending cap, so you always get SOME answer instead of the
+# chat just hanging forever with no response.
 def run_claude_message(chat_id, user_text):
     chat = load_chat_by_id(chat_id)
     if not chat:
         return
     session = get_session(chat_id)
     with _sessions_lock:
+        # In plain English: if this chat is already busy answering a
+        # previous message, don't start a second answer on top of it -
+        # just stop here.
         # Check-and-set must be atomic: without the lock, two calls for the
         # same chat (e.g. a WS "input" racing an upload's direct call) can
         # both see running=False and both spawn a `claude --resume` process
@@ -737,6 +863,10 @@ def run_claude_message(chat_id, user_text):
     chat_dir = os.path.join(CHATS_DIR, chat["dirName"])
     ensure_git_repo(chat_dir)
 
+    # In plain English: normally the AI remembers earlier messages on its
+    # own (it's the "same conversation" under the hood). But the very
+    # first time, or if that memory link is broken, manually paste the
+    # last 10 messages in front of the new one so the AI still has context.
     prompt = user_text
     if not session["session_id"] and len(chat.get("messages", [])) > 1:
         history = chat["messages"][:-1][-10:]
@@ -754,6 +884,9 @@ def run_claude_message(chat_id, user_text):
     is_eval_chat = chat["dirName"].startswith("eval-") and resolve_owner(chat) == "admin"
     budget = "3" if is_eval_chat else "1"
 
+    # In plain English: remembers what files existed (and when they were
+    # last changed) BEFORE the AI runs, so afterward we can tell which
+    # files the AI actually created or edited during this turn.
     files_before = {}
     for f in get_chat_files(chat):
         try:
@@ -761,6 +894,10 @@ def run_claude_message(chat_id, user_text):
         except OSError:
             files_before[f] = 0
 
+    # In plain English: this inner function does the actual work of
+    # "start the AI, feed it the message, and collect its answer." It's
+    # written as its own mini-function so it can be run a SECOND time if
+    # the first attempt fails in a specific recoverable way (see below).
     def _spawn_and_collect():
         """Launches the CLI once and collects everything about that one
         attempt. Split out of run_claude_message so a resume that fails
@@ -781,6 +918,9 @@ def run_claude_message(chat_id, user_text):
         if session["session_id"]:
             args += ["--resume", session["session_id"]]
 
+        # In plain English: actually starts the real Claude Code AI as its
+        # own separate running program (like double-clicking an app), with
+        # its input/output connected back to this code so we can talk to it.
         try:
             proc = subprocess.Popen(args, cwd=chat_dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True, bufsize=1, env=agent_env())
@@ -792,6 +932,8 @@ def run_claude_message(chat_id, user_text):
         result_info = {}
         stderr_lines = []
 
+        # In plain English: types the actual message into the AI's input,
+        # in the background, so nothing else has to wait for it.
         def write_stdin():
             try:
                 proc.stdin.write(prompt)
@@ -801,6 +943,11 @@ def run_claude_message(chat_id, user_text):
 
         threading.Thread(target=write_stdin, daemon=True).start()
 
+        # In plain English: this is the part that "listens" to everything
+        # the AI says back, as it says it. Each line the AI outputs
+        # describes one small event - "here's a session ID," "here's a
+        # piece of text I'm saying," "here's a tool I'm using" - and this
+        # loop reacts to each one, forwarding real text to your screen live.
         def read_stdout():
             for line in proc.stdout:
                 line = line.strip()
@@ -830,6 +977,9 @@ def run_claude_message(chat_id, user_text):
         reader_thread = threading.Thread(target=read_stdout, daemon=True)
         reader_thread.start()
 
+        # In plain English: also listens for any ERROR messages the AI
+        # process prints, so if something goes wrong we have a real reason
+        # written down instead of just silence.
         def read_stderr():
             # Nothing drained this before, ever. On a heavy multi-tool-use turn
             # (several Bash calls, sudo, psql) that's a real deadlock risk if the
@@ -847,6 +997,8 @@ def run_claude_message(chat_id, user_text):
         stderr_thread = threading.Thread(target=read_stderr, daemon=True)
         stderr_thread.start()
 
+        # In plain English: wait here until the AI process is completely
+        # done, then hand back everything it said as one final answer.
         proc.wait()
         reader_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
@@ -854,6 +1006,10 @@ def run_claude_message(chat_id, user_text):
 
         return "".join(response_parts).strip(), stderr_lines, result_info, None
 
+    # In plain English: this runs in the background after the AI is done -
+    # it takes whatever the AI said (or figures out a sensible message if
+    # something went wrong instead), saves it as the AI's reply in the
+    # chat, and then tells your browser "the reply is finished."
     def waiter():
         # Everything below was previously unguarded: any exception (a bad
         # git_run, a JSON hiccup, load_chat_by_id failing) would kill this
@@ -921,6 +1077,9 @@ def run_claude_message(chat_id, user_text):
                               f"assistant output; stderr tail:\n" +
                               "\n".join(stderr_lines[-20:]), flush=True)
                     full_text = "Something went wrong generating a response. Please try again."
+            # In plain English: check if the AI created or changed any files
+            # while it was working, and if so, tell your browser about them
+            # so they show up in the chat.
             if fresh:
                 chat_dir2 = os.path.join(CHATS_DIR, fresh["dirName"])
                 changed = []
@@ -965,13 +1124,23 @@ def run_claude_message(chat_id, user_text):
             session["proc"] = None
             broadcast({"type": "response_done", "chatId": chat_id})
 
+    # In plain English: run all of the above in the background, so sending
+    # a message doesn't freeze the rest of the app while the AI thinks.
     threading.Thread(target=waiter, daemon=True).start()
 
 
 # ---------------- Flask wiring ----------------
+# In plain English: this one function is where every single web address
+# ("/api/chats", "/api/tables", the live-chat connection, etc.) gets set
+# up and connected to the piece of code that handles it. If you're
+# wondering "what happens when the browser asks for X," this is where
+# to look - every route is defined somewhere inside this function.
 def init_chats(app):
     sock = Sock(app)
 
+    # In plain English: this is the "live connection" every open chat tab
+    # keeps open to the server, so replies can stream in instantly instead
+    # of the browser having to keep re-asking "is there a new message yet?"
     @sock.route("/ws")
     def ws_route(ws):
         client = WSClient(ws)
@@ -993,6 +1162,10 @@ def init_chats(app):
             with _ws_clients_lock:
                 _ws_clients.discard(client)
 
+    # In plain English: figures out what a message coming over that live
+    # connection actually wants - "I'm opening this chat, send me updates"
+    # (join), or "here's a new message I'm sending" (input) - and checks
+    # the sender is actually logged in and allowed to do that before acting.
     def _handle_ws_message(client, msg):
         mtype = msg.get("type")
         if mtype == "join":
@@ -1031,11 +1204,17 @@ def init_chats(app):
                 append_message(chat, "user", text)
             run_claude_message(chat_id, text)
 
+    # In plain English: a reusable "are you allowed to CHANGE this chat?"
+    # check - only the chat's owner or an admin can rename it, delete
+    # files from it, pin things, etc.
     def _require_owner_or_admin(chat):
         if g.role != "admin" and resolve_owner(chat) != g.username:
             return jsonify({"error": "Forbidden"}), 403
         return None
 
+    # In plain English: a reusable "are you allowed to just LOOK at this
+    # chat?" check - looser than the one above, since guests are supposed
+    # to be able to view chats.
     def _require_can_view(chat):
         """Read-side counterpart to _require_owner_or_admin. Every write
         route already checked ownership; every read route only checked
@@ -1052,6 +1231,8 @@ def init_chats(app):
             return jsonify({"error": "Forbidden"}), 403
         return None
 
+    # In plain English: the address the app calls to get "the list of all
+    # chats," in the right saved order, for the sidebar/homepage.
     @app.get("/api/chats")
     @require_auth
     def api_list_chats():
@@ -1074,6 +1255,8 @@ def init_chats(app):
             })
         return jsonify({"chats": out, "meta": {"totalUsers": 2}})
 
+    # In plain English: saves the new order after you drag chats around in
+    # the sidebar.
     @app.patch("/api/chat-order")
     @require_auth
     def api_chat_order():
@@ -1083,6 +1266,8 @@ def init_chats(app):
         save_order(ids)
         return jsonify({"ok": True})
 
+    # In plain English: creates a brand-new, empty chat (the "+ New Chat"
+    # button) and drops in the friendly greeting message.
     @app.post("/api/chats")
     @require_auth
     def api_create_chat():
@@ -1101,6 +1286,8 @@ def init_chats(app):
         schedule_repo_size()
         return jsonify(chat)
 
+    # In plain English: fetches everything about one specific chat - its
+    # full message history, title, etc. - so it can be opened and displayed.
     @app.get("/api/chats/<chat_id>")
     @require_auth
     def api_get_chat(chat_id):
@@ -1114,6 +1301,8 @@ def init_chats(app):
         return jsonify({**chat, "ownerId": resolve_owner(chat), "isRunning": bool(sess.get("running")),
                         "runStartTime": sess.get("start_time")})
 
+    # In plain English: renames a chat (and, behind the scenes, renames
+    # its folder on disk to match).
     @app.patch("/api/chats/<chat_id>")
     @require_auth
     def api_rename_chat(chat_id):
@@ -1134,6 +1323,10 @@ def init_chats(app):
             save_chat(chat)
         return jsonify({"ok": True, "dirName": chat["dirName"]})
 
+    # In plain English: permanently deletes a chat - stops the AI if it's
+    # mid-reply, removes its folder, removes its backup copy in S3, and
+    # forgets about it everywhere. Admin only, on purpose (nobody else can
+    # do this, not even the chat's own owner).
     @app.delete("/api/chats/<chat_id>")
     @require_auth
     def api_delete_chat(chat_id):
@@ -1163,6 +1356,8 @@ def init_chats(app):
         schedule_repo_size()
         return jsonify({"ok": True})
 
+    # In plain English: the "Stop" button - interrupts the AI mid-answer if
+    # it's taking too long or going the wrong direction.
     @app.post("/api/chats/<chat_id>/stop")
     @require_auth
     def api_stop_chat(chat_id):
@@ -1174,6 +1369,8 @@ def init_chats(app):
                 pass
         return jsonify({"ok": True})
 
+    # In plain English: packages up an entire chat's folder as a .zip file
+    # you can download.
     @app.get("/api/chats/<chat_id>/export")
     @require_auth
     def api_export_chat(chat_id):
@@ -1195,6 +1392,9 @@ def init_chats(app):
                           download_name=f"{chat['dirName']}.zip")
 
     # ---- pins ----
+    # In plain English: "pins" are files you've told the AI to always
+    # remember/pay attention to for a chat. This lists what's pinned, plus
+    # what else COULD be pinned.
     @app.get("/api/chats/<chat_id>/pins")
     @require_auth
     def api_get_pins(chat_id):
@@ -1206,6 +1406,8 @@ def init_chats(app):
             return err
         return jsonify({"pinned": chat.get("pinnedFiles", []), "available": get_chat_items(chat)})
 
+    # In plain English: pins one file/folder so the AI always keeps it in
+    # mind for this chat.
     @app.post("/api/chats/<chat_id>/pins")
     @require_auth
     def api_add_pin(chat_id):
@@ -1224,6 +1426,7 @@ def init_chats(app):
             save_chat(chat)
         return jsonify({"ok": True, "pinned": chat["pinnedFiles"]})
 
+    # In plain English: un-pins a file.
     @app.delete("/api/chats/<chat_id>/pins/<path:item>")
     @require_auth
     def api_remove_pin(chat_id, item):
@@ -1238,6 +1441,8 @@ def init_chats(app):
         return jsonify({"ok": True, "pinned": chat["pinnedFiles"]})
 
     # ---- files ----
+    # In plain English: lists the files attached to a chat (uploads, and
+    # things the AI made).
     @app.get("/api/chats/<chat_id>/files")
     @require_auth
     def api_list_files(chat_id):
@@ -1249,6 +1454,9 @@ def init_chats(app):
             return err
         return jsonify(get_chat_files(chat))
 
+    # In plain English: downloads one specific file from a chat. Double
+    # checks the requested file path can't sneak outside the chat's own
+    # folder (no "give me a file from somewhere else on the server" tricks).
     @app.get("/api/chats/<chat_id>/files/<path:filename>")
     @require_auth
     def api_download_file(chat_id, filename):
@@ -1266,6 +1474,10 @@ def init_chats(app):
         return send_file(full, mimetype=MIME.get(ext, "application/octet-stream"),
                           as_attachment=True, download_name=os.path.basename(full))
 
+    # In plain English: handles uploading a file into a chat - checks the
+    # filename isn't trying anything sneaky, saves the file, scans its text
+    # for obvious "trick the AI" phrases, and tells the AI about the new
+    # file (with a warning attached if something suspicious was found).
     @app.post("/api/chats/<chat_id>/upload")
     @require_auth
     def api_upload_file(chat_id):
@@ -1320,6 +1532,9 @@ def init_chats(app):
         return jsonify({"ok": True})
 
     # ---- cleanup ----
+    # In plain English: "if I delete everything older than N days, how much
+    # space would that free up?" - a preview before actually deleting
+    # anything, so you can decide if it's worth it.
     @app.post("/api/chats/<chat_id>/cleanup-preview")
     @require_auth
     def api_cleanup_preview(chat_id):
@@ -1346,6 +1561,8 @@ def init_chats(app):
             pass
         return jsonify({"bytes": total_bytes, "count": count})
 
+    # In plain English: actually deletes old files from a chat's folder
+    # (older than N days) to free up disk space - skips anything pinned.
     @app.post("/api/chats/<chat_id>/cleanup")
     @require_auth
     def api_cleanup(chat_id):
@@ -1374,6 +1591,8 @@ def init_chats(app):
         schedule_repo_size()
         return jsonify({"deleted": deleted, "freed": freed})
 
+    # In plain English: serves profile picture / icon image files. Anyone
+    # can view these (no login needed) since they're just public pictures.
     @app.get("/avatars/<path:filename>")
     def api_asset(filename):
         full = os.path.realpath(os.path.join(ASSETS_DIR, os.path.basename(filename)))
@@ -1383,6 +1602,7 @@ def init_chats(app):
         return send_file(full, mimetype=MIME.get(ext, "application/octet-stream"))
 
     # ---- read-only database browser ----
+    # In plain English: asks Postgres "what tables do you actually have?"
     def list_table_names():
         _, rows = run_readonly_query(
             "SELECT table_name FROM information_schema.tables "
@@ -1397,6 +1617,8 @@ def init_chats(app):
     # database too - that's the actual gap. Guests are meant to have broad
     # read access (same as chat viewing), so they're allowed here on
     # purpose, not by oversight; only a plain "user" role is blocked.
+    # In plain English: lists every table in the database, for the
+    # database-browser page.
     @app.get("/api/tables")
     @require_auth
     def api_list_tables():
@@ -1404,6 +1626,8 @@ def init_chats(app):
             return jsonify({"error": "Forbidden"}), 403
         return jsonify({"tables": list_table_names()})
 
+    # In plain English: dumps EVERY table's entire contents into one big
+    # downloadable spreadsheet file (CSV).
     @app.get("/api/tables/export")
     @require_auth
     def api_export_tables():
@@ -1429,6 +1653,8 @@ def init_chats(app):
             download_name="database_export.csv",
         )
 
+    # In plain English: shows the first 200 rows of one specific table, for
+    # the database-browser page.
     @app.get("/api/tables/<table_name>")
     @require_auth
     def api_table_rows(table_name):
@@ -1449,6 +1675,8 @@ def init_chats(app):
         return jsonify({"columns": columns, "rows": rows})
 
     # ---- admin-only ----
+    # In plain English: an emergency "turn the whole server off" button.
+    # Admin only, obviously.
     @app.post("/api/shutdown")
     @require_auth
     def api_shutdown():
@@ -1463,6 +1691,8 @@ def init_chats(app):
         return jsonify({"ok": True})
 
     # ---- storage ----
+    # In plain English: reports how much disk space all the chats are
+    # using, for the little storage meter in the app.
     @app.get("/api/storage")
     @require_auth
     def api_storage():

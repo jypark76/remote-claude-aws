@@ -1,9 +1,15 @@
+// In plain English: this is the entire website you see and click on -
+// the login screen, the list of chats, the actual chat window, and the
+// little database-browser pages. Everything on screen comes from this
+// one file.
 import { useState, useEffect, useRef, useCallback } from "react";
 import { login, completeNewPassword } from "./auth";
 import { API_BASE } from "./config";
 import { useSocket } from "./useSocket";
 import "./App.css";
 
+// In plain English: reads the info packed inside a login token (like
+// peeking inside a sealed envelope) - your username, when it expires, etc.
 function decodeClaims(token) {
   try {
     return JSON.parse(atob(token.split(".")[1]));
@@ -11,10 +17,14 @@ function decodeClaims(token) {
     return null;
   }
 }
+// In plain English: pulls just the username out of a login token.
 function decodeUsername(token) {
   const payload = decodeClaims(token);
   return payload ? payload["cognito:username"] || payload.username || "" : "";
 }
+// In plain English: a shortcut for "ask the server this, with my login
+// token attached," used everywhere in this file instead of repeating the
+// same networking code.
 async function api(path, token, opts = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     ...opts,
@@ -30,13 +40,18 @@ async function api(path, token, opts = {}) {
   return res.json();
 }
 
+// In plain English: turns a raw timestamp into a friendly "2:45 PM" style
+// clock time.
 function timeAgo(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
+// In plain English: turns a number of milliseconds into "12s" or "2m 5s" -
+// used for "the AI thought for..." labels.
 function fmtElapsed(ms) {
   const s = Math.floor(ms / 1000);
   return s < 60 ? s + "s" : Math.floor(s / 60) + "m " + (s % 60) + "s";
 }
+// In plain English: turns a raw byte count into "3.2 MB" style text.
 function fmtBytes(b) {
   if (b < 1024) return b + " B";
   if (b < 1024 * 1024) return (b / 1024).toFixed(1) + " KB";
@@ -48,12 +63,17 @@ const FILE_ICONS = {
   ppt: "📋", zip: "📦", png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", txt: "📃",
   md: "📃", json: "📃", py: "📃", sh: "📃",
 };
+// In plain English: picks a little emoji icon based on a file's type
+// (spreadsheet, PDF, image, etc.), so file attachments look recognizable
+// at a glance.
 function fileIcon(name) {
   const ext = (name.split(".").pop() || "").toLowerCase();
   return FILE_ICONS[ext] || "📎";
 }
 const IMG_EXT = /\.(png|jpg|jpeg|gif|webp)$/i;
 
+// In plain English: shows someone's profile picture, or a plain "person"
+// icon if they don't have one / it fails to load.
 function Avatar({ ownerId, className }) {
   const [errored, setErrored] = useState(false);
   if (errored) return <div className={className}>👤</div>;
@@ -69,6 +89,9 @@ function Avatar({ ownerId, className }) {
   );
 }
 
+// In plain English: cleans up "invisible" terminal formatting codes and
+// spinner characters that sometimes sneak into the AI's raw text output,
+// so what you see on screen is clean readable text, not garbled symbols.
 function stripAnsi(s) {
   return s
     .replace(/\x1b\[[0-9;?<=>]*[A-Za-z]/g, "")
@@ -83,6 +106,10 @@ const TOOL_VERBS = {
   Agent: "Delegating",
 };
 
+// In plain English: the AI sometimes ends a reply with an invisible
+// "marker" word (like __OFF_TOPIC__) that tells the WEBSITE something,
+// e.g. "this was a safety test." This removes those marker words before
+// showing the reply to you, since they're not meant to be read by people.
 const EVAL_MARKERS = ["__OFF_TOPIC__", "__INJECTION_REJECTED__", "__EXCESSIVE_WORK_REJECTED__", "__DISCLOSURE_REJECTED__", "__CAPABILITY_DENIED__"];
 function stripEvalMarkers(text) {
   if (!text) return text;
@@ -91,6 +118,9 @@ function stripEvalMarkers(text) {
   return out.trim();
 }
 
+// In plain English: same idea, but for the specific marker that means
+// "show Approve/Reject buttons here" - removes the marker text and
+// returns a flag telling the screen to actually show those buttons.
 const APPROVE_MARKER = "__ASK_APPROVE_REJECT__";
 function stripApproveMarker(text) {
   text = stripEvalMarkers(text);
@@ -99,6 +129,8 @@ function stripApproveMarker(text) {
 }
 
 // ---------------- Login ----------------
+// In plain English: the login page - a username/password box, and if
+// your account needs a fresh password set, a second box for that too.
 function LoginScreen({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -153,6 +185,9 @@ function LoginScreen({ onLogin }) {
 }
 
 // ---------------- Chat list ----------------
+// In plain English: the home screen - the sidebar list of all your chats,
+// with search, sorting, drag-to-reorder, storage usage, and the buttons
+// to make a new chat or open the database browser.
 function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpenTables }) {
   const [chats, setChats] = useState([]);
   const [meta, setMeta] = useState(null);
@@ -168,6 +203,8 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
   const dragSrc = useRef(null);
   const [dragOverId, setDragOverId] = useState(null);
 
+  // In plain English: the "shut down the server" button - asks twice to
+  // make sure, since this is destructive.
   async function killServer() {
     if (!window.confirm("Shut down the server?")) return;
     if (!window.confirm("Are you sure? All running chats will stop.")) return;
@@ -176,6 +213,8 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     window.alert("Server restarting (systemd will bring it back in a few seconds)...");
   }
 
+  // In plain English: fetches the current list of chats from the server
+  // and updates what's shown on screen.
   const load = useCallback(async () => {
     setLoading(true);
     setError(false);
@@ -194,6 +233,10 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     api("/api/storage", token).then(setStorage).catch(() => {});
   }, [load, token]);
 
+  // In plain English: listens for live updates from the server - "a chat
+  // is thinking," "a reply just finished," "a chat got deleted" - and
+  // updates the list on screen the instant those happen, without needing
+  // to refresh the page.
   useEffect(() => {
     return socket.subscribe((msg) => {
       if (msg.type === "storage_update") setStorage(msg);
@@ -221,6 +264,8 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     localStorage.setItem("sortDir", sortDir);
   }, [sortField, sortDir]);
 
+  // In plain English: the "+ New Chat" button - asks for a name, creates
+  // the chat, and opens it.
   async function newChat() {
     const input = window.prompt("Chat name (or leave blank):");
     if (input === null) return;
@@ -233,6 +278,7 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     }
   }
 
+  // In plain English: deletes one chat from the list, after confirming.
   async function deleteChat(e, c) {
     e.stopPropagation();
     if (!window.confirm(`Delete "${c.title}"?`)) return;
@@ -241,6 +287,8 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     load();
   }
 
+  // In plain English: puts the chat list in the order you asked for
+  // (newest first, alphabetical, by owner, etc.).
   function sortChats(list) {
     if (sortField === "custom") return list;
     const sorted = [...list].sort((a, b) => {
@@ -261,6 +309,8 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
   const filtered = q ? chats.filter((c) => (c.title || "").toLowerCase().includes(q)) : chats;
   const visible = sortChats(filtered);
 
+  // In plain English: handles dragging one chat and dropping it in a new
+  // spot in the list, and saves that custom order.
   function onDrop(targetId) {
     if (!dragSrc.current || dragSrc.current === targetId) {
       setDragOverId(null);
@@ -278,6 +328,8 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     setDragOverId(null);
   }
 
+  // In plain English: a shortcut button to instantly pin one chat to the
+  // very top of the list.
   function moveToTop(e, id) {
     e.stopPropagation();
     const ids = visible.map((c) => c.id);
@@ -396,6 +448,8 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
 }
 
 // ---------------- Database browser (read-only) ----------------
+// In plain English: the "look inside the database" page - just lists the
+// table names, with a button to download everything as one spreadsheet.
 function TablesScreen({ token, onOpen, onBack }) {
   const [tables, setTables] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -409,6 +463,8 @@ function TablesScreen({ token, onOpen, onBack }) {
       .finally(() => setLoading(false));
   }, [token]);
 
+  // In plain English: the "Download everything as CSV" button - triggers
+  // a normal file download in the browser.
   function exportCsv() {
     setExporting(true);
     const url = `${API_BASE}/api/tables/export?token=${encodeURIComponent(token)}`;
@@ -450,6 +506,9 @@ function TablesScreen({ token, onOpen, onBack }) {
   );
 }
 
+// In plain English: shows one specific database table as a spreadsheet-
+// style grid, and lets you click a cell to see its full content if it's
+// too long to fit.
 function TableDetailScreen({ token, tableName, onBack }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -520,11 +579,15 @@ function TableDetailScreen({ token, tableName, onBack }) {
 }
 
 // ---------------- Pin modal ----------------
+// In plain English: the popup that lets you pick which files the AI
+// should always keep in mind for this chat, and unpin ones you no longer
+// need pinned.
 function PinModal({ token, chatId, onClose }) {
   const [pinned, setPinned] = useState([]);
   const [available, setAvailable] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // In plain English: fetches the current pinned/available file list.
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -537,6 +600,7 @@ function PinModal({ token, chatId, onClose }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // In plain English: pins one file.
   async function pin(name) {
     try {
       await api(`/api/chats/${chatId}/pins`, token, { method: "POST", body: JSON.stringify({ item: name }) });
@@ -545,6 +609,7 @@ function PinModal({ token, chatId, onClose }) {
       window.alert("Failed to pin: " + e.message);
     }
   }
+  // In plain English: unpins one file, after confirming.
   async function unpin(name) {
     if (!window.confirm(`Unpin "${name}"? It stays in the chat folder but leaves the git repo.`)) return;
     try {
@@ -604,6 +669,9 @@ function PinModal({ token, chatId, onClose }) {
 }
 
 // ---------------- Sweep modal ----------------
+// In plain English: the "clean up old files" popup - lets you pick "older
+// than N days," shows how much space that would free, and only then lets
+// you actually delete them.
 function SweepModal({ token, chatId, onClose }) {
   const [days, setDays] = useState(30);
   const [status, setStatus] = useState("");
@@ -611,6 +679,8 @@ function SweepModal({ token, chatId, onClose }) {
   const [deleting, setDeleting] = useState(false);
   const timerRef = useRef(null);
 
+  // In plain English: asks the server "how much would deleting files older
+  // than N days actually free up?" without deleting anything yet.
   const preview = useCallback(async (d) => {
     setStatus("…");
     setCanDelete(false);
@@ -629,6 +699,9 @@ function SweepModal({ token, chatId, onClose }) {
 
   useEffect(() => { preview(days); }, []); // eslint-disable-line
 
+  // In plain English: whenever you change the number of days, waits a
+  // moment (so it's not re-checking on every keystroke) then re-checks how
+  // much would be freed.
   function onDaysChange(v) {
     setDays(v);
     clearTimeout(timerRef.current);
@@ -637,6 +710,8 @@ function SweepModal({ token, chatId, onClose }) {
     timerRef.current = setTimeout(() => preview(Number(v) || 0), 600);
   }
 
+  // In plain English: actually deletes the old files, once you've clicked
+  // the confirm button.
   async function confirmDelete() {
     setDeleting(true);
     try {
@@ -671,6 +746,10 @@ function SweepModal({ token, chatId, onClose }) {
 }
 
 // ---------------- Chat screen ----------------
+// In plain English: this is the actual chat window - the biggest, most
+// complex piece of screen. It shows the message history, the typing box,
+// the "AI is thinking..." indicator, file uploads/drag-and-drop, voice
+// input, search-within-chat, and the pin/cleanup popups.
 function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
   const [chat, setChat] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -703,18 +782,23 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
   chatRef.current = chat;
 
 
+  // In plain English: scrolls the chat down to the newest message.
   function scrollToBottom() {
     requestAnimationFrame(() => {
       if (messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
     });
   }
 
+  // In plain English: adds one new message bubble to the screen.
   function addBubble(role, text, ts, files, thinkMs, askApproveReject) {
     if (!text.trim() && !(files && files.length)) return;
     setMessages((m) => [...m, { id: nextId(), role, text, ts: ts || Date.now(), files: files || null, thinkMs: thinkMs || 0, askApproveReject: !!askApproveReject }]);
     scrollToBottom();
   }
 
+  // In plain English: takes all the little pieces of text the AI has
+  // streamed in so far, cleans them up, and turns them into one finished
+  // message bubble.
   function flushOutput(done) {
     const text = outputBufferRef.current.trim();
     outputBufferRef.current = "";
@@ -729,6 +813,7 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
     if (done) stopThinking();
   }
 
+  // In plain English: turns on the "AI is thinking..." indicator.
   function startThinking(verb) {
     setThinking(true);
     const start = Date.now();
@@ -736,17 +821,22 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
     setThinkVerb(verb || "Thinking…");
     scrollToBottom();
   }
+  // In plain English: turns off the "AI is thinking..." indicator.
   function stopThinking() {
     setThinking(false);
     setElapsedLabel("");
   }
 
+  // In plain English: while the AI is thinking, updates the "12s..." timer
+  // label once every second.
   useEffect(() => {
     if (!thinking) return;
     const t = setInterval(() => setElapsedLabel(fmtElapsed(Date.now() - thinkStart)), 1000);
     return () => clearInterval(t);
   }, [thinking, thinkStart]);
 
+  // In plain English: fetches this chat's full message history from the
+  // server when you first open it.
   async function loadChat() {
     try {
       const c = await api(`/api/chats/${chatId}`, token);
@@ -764,12 +854,17 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
     }
   }
 
+  // In plain English: whenever you open a (different) chat, load its
+  // history and tell the server "I'm watching this one now."
   useEffect(() => {
     loadChat();
     socket.send({ type: "join", chatId, userToken: token });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId]);
 
+  // In plain English: listens for live updates about THIS chat specifically
+  // - new text streaming in, a tool being used, the reply finishing, new
+  // files appearing, or the chat getting deleted from elsewhere.
   useEffect(() => {
     return socket.subscribe((msg) => {
       if (msg.chatId !== chatId) {
@@ -801,6 +896,8 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, chatId, thinkStart]);
 
+  // In plain English: when the AI creates new files, shows images inline
+  // in the chat right away.
   function showFiles(files) {
     files.forEach(async (f) => {
       if (IMG_EXT.test(f)) {
@@ -816,6 +913,8 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
     });
   }
 
+  // In plain English: the "Send" button's actual logic - if you attached
+  // files, uploads them; otherwise just sends your typed message.
   async function doSend() {
     const text = input.trim();
     if (!canWrite) return;
@@ -845,6 +944,9 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
     setInput("");
   }
 
+  // In plain English: actually sends a plain text message - shows it on
+  // screen immediately, sends it to the server, and starts the "thinking"
+  // indicator.
   function sendChatText(text) {
     if (!canWrite || !text.trim() || thinking) return;
     addBubble("user", text, Date.now());
@@ -852,18 +954,22 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
     startThinking("Thinking…");
   }
 
+  // In plain English: the "Approve" button.
   function handleApprove() {
     sendChatText("Approve it.");
   }
 
+  // In plain English: the "Reject" button.
   function handleReject() {
     sendChatText("Reject it.");
   }
 
+  // In plain English: the "Stop" button.
   async function stopRun() {
     await api(`/api/chats/${chatId}/stop`, token, { method: "POST" }).catch(() => {});
   }
 
+  // In plain English: renames the currently-open chat.
   async function rename() {
     if (!canWrite || !chat) return;
     const newTitle = window.prompt("Rename chat:", chat.title);
@@ -872,6 +978,7 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
     setChat((c) => ({ ...c, title: newTitle }));
   }
 
+  // In plain English: downloads this whole chat as a .zip file.
   async function doExport() {
     setExporting(true);
     try {
@@ -887,9 +994,13 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
     }
   }
 
+  // In plain English: adds files to the "about to send" attachment list
+  // (from picking, pasting, or dragging them in).
   function addFiles(list) {
     setSelectedFiles((s) => [...s, ...Array.from(list)]);
   }
+  // In plain English: removes one file from the "about to send" list
+  // before you've actually sent it.
   function removeFile(i) {
     setSelectedFiles((s) => s.filter((_, idx) => idx !== i));
   }
@@ -908,12 +1019,16 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
     return () => document.removeEventListener("paste", onPaste);
   }, []);
 
+  // In plain English: shows the "jump to bottom" button when you've
+  // scrolled up away from the newest message.
   function onScroll() {
     const el = messagesRef.current;
     if (!el) return;
     setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight >= 60);
   }
 
+  // In plain English: the microphone button - turns your speech into typed
+  // text using the browser's built-in speech recognition.
   function toggleVoice() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
@@ -1121,6 +1236,10 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
 }
 
 // ---------------- App ----------------
+// In plain English: the top-level "traffic controller" of the whole
+// website - decides whether you're looking at the login screen, the chat
+// list, one open chat, or the database browser, and keeps track of
+// whether you're currently logged in.
 export default function App() {
   // Deliberately in-memory only, not localStorage - a JWT sitting in
   // localStorage is readable by any script on the page, so any future XSS
@@ -1132,6 +1251,8 @@ export default function App() {
   const [view, setView] = useState({ screen: "list" });
   const socket = useSocket();
 
+  // In plain English: remembers you're logged in once you've successfully
+  // logged in.
   function handleLogin(newToken) {
     setToken(newToken);
   }
@@ -1141,6 +1262,7 @@ export default function App() {
   const username = decodeUsername(token);
   const role = username === "admin" ? "admin" : username === "guest" ? "guest" : "user";
 
+  // In plain English: logs you out and goes back to the login screen.
   function logout() {
     setToken(null);
     setView({ screen: "list" });
