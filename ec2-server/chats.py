@@ -596,8 +596,7 @@ def write_chat_md(chat):
         f.write(chat_claude_md(chat))
 
 
-PATH_GUARD_HOOK = "/home/ec2-user/hooks/path_guard.py"
-
+PATH_GUARD_HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks", "path_guard.py")
 
 # In plain English: writes the ACTUAL enforced version of "stay in your
 # own folder" for regular users - not just a written instruction the AI is
