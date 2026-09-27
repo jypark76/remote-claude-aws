@@ -190,7 +190,6 @@ function LoginScreen({ onLogin }) {
 // to make a new chat or open the database browser.
 function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpenTables }) {
   const [chats, setChats] = useState([]);
-  const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [search, setSearch] = useState("");
@@ -221,7 +220,6 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
     try {
       const data = await api("/api/chats", token);
       setChats(data.chats || []);
-      setMeta(data.meta || null);
     } catch {
       setError(true);
     }
@@ -239,7 +237,6 @@ function ChatListScreen({ token, username, role, socket, onOpen, onLogout, onOpe
   // to refresh the page.
   useEffect(() => {
     return socket.subscribe((msg) => {
-      if (msg.type === "storage_update") setStorage(msg);
       if (msg.type === "output" || msg.type === "tool_use") {
         const verb =
           msg.type === "tool_use"
@@ -778,9 +775,6 @@ function ChatScreen({ token, username, chatId, socket, onBack, onDeleted }) {
   const nextId = () => ++idCounter.current;
 
   const canWrite = username !== "guest" && (chat ? username === "admin" || (chat.ownerId || "admin") === username : false);
-  const chatRef = useRef(chat);
-  chatRef.current = chat;
-
 
   // In plain English: scrolls the chat down to the newest message.
   function scrollToBottom() {

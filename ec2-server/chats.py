@@ -1253,7 +1253,7 @@ def init_chats(app):
                 "preview": (c.get("messages") or [{}])[-1].get("text", "")[:80] if c.get("messages") else "",
                 "isRunning": bool(sess.get("running")), "runStartTime": sess.get("start_time"),
             })
-        return jsonify({"chats": out, "meta": {"totalUsers": 2}})
+        return jsonify({"chats": out})
 
     # In plain English: saves the new order after you drag chats around in
     # the sidebar.
@@ -1441,19 +1441,6 @@ def init_chats(app):
         return jsonify({"ok": True, "pinned": chat["pinnedFiles"]})
 
     # ---- files ----
-    # In plain English: lists the files attached to a chat (uploads, and
-    # things the AI made).
-    @app.get("/api/chats/<chat_id>/files")
-    @require_auth
-    def api_list_files(chat_id):
-        chat = load_chat_by_id(chat_id)
-        if not chat:
-            return jsonify({"error": "not found"}), 404
-        err = _require_can_view(chat)
-        if err:
-            return err
-        return jsonify(get_chat_files(chat))
-
     # In plain English: downloads one specific file from a chat. Double
     # checks the requested file path can't sneak outside the chat's own
     # folder (no "give me a file from somewhere else on the server" tricks).
