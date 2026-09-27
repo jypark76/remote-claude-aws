@@ -41,11 +41,6 @@ gitignored eval/.env file to actually run:
 
     EVAL_ADMIN_PASSWORD=<the real admin Cognito password>
     EVAL_DB_SECRET_LITERAL=<the real grading_app Postgres password>
-
-An earlier version of this file had both hardcoded directly and got pushed
-to this public repo before anyone caught it. History was rewritten to
-scrub that exposure. Don't put a real value back in this file - if you're
-reading this and EVAL_ADMIN_PASSWORD isn't set, create eval/.env instead.
 """
 import asyncio
 import json
