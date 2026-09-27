@@ -80,7 +80,7 @@ def run_readonly_query(sql):
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ASSETS_DIR = os.path.join(os.path.expanduser("~"), "assets")
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 os.makedirs(ASSETS_DIR, exist_ok=True)
 CHATS_DIR = os.path.join(os.path.expanduser("~"), "chats")
 ORDER_FILE = os.path.join(CHATS_DIR, "order.json")
