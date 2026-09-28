@@ -12,6 +12,7 @@ from flask import Flask, jsonify, send_from_directory
 import os
 
 from chats import init_chats
+from external_api import init_external_api
 
 # In plain English: this file is the "front door" of the server. It starts
 # up the web server, hands it the real chat/grading logic (from chats.py),
@@ -26,6 +27,9 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB - this box has an 8G
 # uploading files, the database browser, etc.) - all of that lives in
 # chats.py; this just switches it on.
 init_chats(app)
+# Colleagues' read-only access to the database - a separate, external-facing
+# surface from the chat app above (see external_api.py's own docstring).
+init_external_api(app)
 
 
 # A simple "are you alive?" check. Nothing fancy - if this URL loads and

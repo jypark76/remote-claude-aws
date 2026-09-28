@@ -1,0 +1,19 @@
+# Reconstructed from the actual imports across ec2-server/*.py - this app
+# never had a requirements.txt before (dependencies were installed by hand
+# on each EC2 box over time, discovered during this session's audit).
+# Versions are intentionally NOT pinned here: this session has no way to
+# check what's actually running on the live boxes. Before relying on this
+# file for a fresh install, run `pip freeze` on an EC2 box and pin these to
+# whatever's actually working there, rather than trusting an unverified guess.
+
+Flask
+flask-sock
+python-jose
+fastembed
+Werkzeug
+gunicorn
+eventlet
+
+# Added for the read-only external API (external_api.py) - talks to
+# Postgres directly via the readonly_api role, see that file's docstring.
+psycopg2-binary
