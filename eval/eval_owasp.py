@@ -617,7 +617,7 @@ def run_sandbox_hook():
     so a regression in either the matcher or the hook path shows up here
     without needing a live model turn to catch it."""
     cmd = (
-        "cd /home/ec2-user && python3 -c \""
+        "cd /home/ec2-user/remote-claude-aws/ec2-server && python3 -c \""
         "import json, chats; "
         "chat = {'id': 'sandbox-hook-check', 'dirName': 'sandbox-hook-check', 'ownerId': 'not-admin'}; "
         "chats.write_chat_settings(chat); "
