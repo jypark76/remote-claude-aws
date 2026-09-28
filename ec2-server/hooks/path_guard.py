@@ -2,7 +2,7 @@
 # PreToolUse hook for standard-user chats. A CLAUDE.md instruction to "stay
 # in your folder" is a prompt, not a guardrail - this makes it a real one.
 #
-# Read/Write/Edit/MultiEdit: block any call whose resolved path falls
+# Read/Write: block any call whose resolved path falls
 # outside this chat's own directory (its cwd). Straightforward - the tool
 # input names one file, so checking it is exact.
 #
@@ -38,7 +38,7 @@ def allow():
     sys.exit(0)
 
 
-if tool in ("Read", "Write", "Edit", "MultiEdit"):
+if tool in ("Read", "Write"):
     path = tool_input.get("file_path") or tool_input.get("path")
     if path:
         chat_dir = os.path.realpath(os.getcwd())

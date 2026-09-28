@@ -606,7 +606,7 @@ PATH_GUARD_HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hook
 def write_chat_settings(chat):
     """Standard-user chats get their CLAUDE.md's 'HARD SECURITY RESTRICTION'
     backed by an actual PreToolUse hook, not just the model's own compliance -
-    Read/Write/Edit/MultiEdit calls that resolve outside this chat's own
+    Read/Write calls that resolve outside this chat's own
     directory get blocked before they run, and Bash commands are checked
     against an allowlist of the app's actual documented workflow shapes
     (see path_guard.py) rather than trusting the model to stay in its lane
@@ -629,7 +629,7 @@ def write_chat_settings(chat):
             "hooks": {
                 "PreToolUse": [
                     {
-                        "matcher": "Read|Write|Edit|MultiEdit|Bash",
+                        "matcher": "Read|Write|Bash",
                         "hooks": [{"type": "command", "command": f"python3 {PATH_GUARD_HOOK}"}],
                     }
                 ]
@@ -799,7 +799,7 @@ def format_tool_preview(name, tool_input):
     def short(s):
         return re.sub(r"\s+", " ", (s or "")).strip()[:60]
 
-    if name in ("Edit", "Write", "Read", "MultiEdit"):
+    if name in ("Write", "Read"):
         p = tool_input.get("file_path") or tool_input.get("path") or ""
         return f"{name}({short(os.path.basename(p))[:50]})"
     if name == "Bash":
@@ -904,11 +904,28 @@ def run_claude_message(chat_id, user_text):
         can be retried with a brand new process/pipes rather than reusing a
         proc that has already exited."""
         args = [
-            CLAUDE_BIN, "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose", "--print", "-",
+            CLAUDE_BIN,
+            # --dangerously-skip-permissions is required, not just convenient:
+            # this process is spawned headless, over piped stdin/stdout (see
+            # below), with no TTY and no human on the other end to answer
+            # Claude Code's normal "allow this tool call?" prompts. Without
+            # this flag, the very first Bash/Write call would block
+            # forever waiting for an approval that can never arrive, and
+            # grading would never get past message one.
+            #
+            # This flag removes Claude Code's DEFAULT safety net (a human
+            # approving each risky action). It does not remove safety itself -
+            # the three guardrails right below (--tools, --max-budget-usd) plus
+            # the PreToolUse hook in write_chat_settings()/path_guard.py exist
+            # specifically to reconstruct, programmatically, what that human
+            # approval step would have provided. Removing any one of THOSE
+            # would be a real gap; this flag alone is not one, as long as they
+            # stay in place.
+            "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose", "--print", "-",
             # Excessive-agency guardrail: grading never needs the web, sub-agents,
             # scheduling, or messaging tools, so they're not just discouraged in the
             # persona, they're not in the built-in tool set at all for this process.
-            "--tools", "Bash,Read,Write,Edit",
+            "--tools", "Bash,Read,Write",
             # Unbounded-consumption guardrail: caps real spend on Samantha's billing
             # key per message, enforced by the CLI itself, not by the model noticing
             # it should stop.
