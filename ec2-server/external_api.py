@@ -14,12 +14,18 @@ Flask app process, so it can hold this credential directly.
 readonly_api has SELECT-only grants (see the CREATE ROLE/GRANT statements
 run directly against RDS — not tracked here, same as grading_app) so even
 a bug in this file can't write to the database.
+
+Rate limiting uses a SEPARATE role, rate_limiter (RATE_LIMITER_DB_USER/
+RATE_LIMITER_DB_PASSWORD), scoped to SELECT/INSERT on exactly one table
+(rate_limit_events) - never DELETE, and no access to the 4 real data
+tables at all. Its state has to live in Postgres rather than this
+process's own memory because this app runs on TWO EC2 instances behind a
+load balancer; an in-memory counter on either box only ever sees the
+traffic THAT box happened to receive, never the true total.
 """
 import hashlib
 import logging
 import os
-import threading
-import time
 from functools import wraps
 from logging.handlers import RotatingFileHandler
 
@@ -61,16 +67,6 @@ def _log_access(outcome, colleague_name=None, row_count=None):
         request.path,
         row_count if row_count is not None else "-",
     )
-
-# In-memory sliding-window rate limit, keyed by hashed API key. Safe without
-# extra synchronization concerns beyond the lock below because gunicorn runs
-# this app with a single eventlet worker (-w 1, see the systemd unit) - one
-# process, cooperative scheduling, no risk of two OS threads racing on this
-# dict the way there would be with a real multi-process/multi-thread server.
-# Resets on every deploy/restart - acceptable here (a colleague briefly
-# getting a fresh allowance after a restart is not a real problem).
-_rate_limit_lock = threading.Lock()
-_rate_limit_state = {}  # key_hash -> [timestamps of recent requests]
 
 # Every table this API is allowed to read from. Deliberately a fixed
 # allowlist, not "any table name the caller sends" — same principle as
@@ -122,22 +118,61 @@ def _hash_key(raw_key):
     return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
+def _get_rate_limiter_conn():
+    """Separate connection, separate role from _get_conn()/readonly_api -
+    rate_limiter can SELECT/INSERT on rate_limit_events only, nothing else,
+    so it can't read any real data even if this code had a bug. Same
+    READONLY_DB_HOST (same RDS server), different user/password."""
+    return psycopg2.connect(
+        host=os.environ["READONLY_DB_HOST"],
+        dbname="postgres",
+        user=os.environ["RATE_LIMITER_DB_USER"],
+        password=os.environ["RATE_LIMITER_DB_PASSWORD"],
+        connect_timeout=5,
+    )
+
+
 def _check_rate_limit(key_hash):
     """True if this key is still under RATE_LIMIT_PER_MINUTE, recording this
-    request if so. Sliding window, not fixed-window: a fixed window (e.g.
-    "reset every :00 seconds") lets a caller burst 2x the limit right across
-    a window boundary; this drops anything older than 60s from *now* instead,
-    so the limit holds no matter when in the minute a request lands."""
-    now = time.time()
-    cutoff = now - 60
-    with _rate_limit_lock:
-        timestamps = _rate_limit_state.setdefault(key_hash, [])
-        while timestamps and timestamps[0] < cutoff:
-            timestamps.pop(0)
-        if len(timestamps) >= RATE_LIMIT_PER_MINUTE:
-            return False
-        timestamps.append(now)
-        return True
+    request if so. Backed by Postgres, not in-process memory - two EC2
+    instances behind the ALB each have their own separate process, so an
+    in-memory counter only ever sees the fraction of a burst that the load
+    balancer happened to route to THAT box, never the real total (this is
+    exactly the bug an in-memory version of this function had - confirmed
+    live via api_owasp.py's rate-limit case passing 31 rapid requests
+    straight through with no 429, split roughly evenly across both
+    instances). Postgres is one thing both instances already share, so
+    counting there gives an accurate global count regardless of which
+    instance(s) handle a given burst.
+
+    Windowed COUNT, not delete-then-count: older rows are simply excluded
+    by the WHERE clause, never removed - this code never issues a DELETE.
+    rate_limit_events grows without automatic pruning as a result; at this
+    app's actual scale (a handful of colleagues) that's a slow trickle,
+    and reclaiming space later is a deliberate manual choice, not
+    something the app does to itself.
+
+    Two separate round trips (COUNT, then INSERT), not one atomic
+    transaction - a theoretical race lets two near-simultaneous requests
+    both pass the same count check before either INSERTs. Accepted at this
+    scale, same tradeoff as _get_conn()'s one-connection-per-request (no
+    pool)."""
+    conn = _get_rate_limiter_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM rate_limit_events "
+                "WHERE key_hash = %s AND requested_at > now() - interval '60 seconds'",
+                (key_hash,),
+            )
+            (count,) = cur.fetchone()
+            if count >= RATE_LIMIT_PER_MINUTE:
+                return False
+            cur.execute("INSERT INTO rate_limit_events (key_hash) VALUES (%s)", (key_hash,))
+            conn.commit()
+            return True
+    finally:
+        conn.close()
 
 
 def require_api_key(view):
