@@ -1,0 +1,7 @@
+# Same situation as ec2-server/requirements.txt was before this session -
+# these eval scripts have always relied on packages installed by hand,
+# never tracked. Versions intentionally unpinned; verify against whatever
+# is actually installed wherever you run these scripts from.
+
+websockets   # eval_owasp.py's WebSocket chat connection
+PyYAML       # eval_external_api.py's openapi.yaml validation
