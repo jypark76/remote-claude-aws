@@ -25,7 +25,9 @@ from logging.handlers import RotatingFileHandler
 
 import psycopg2
 import psycopg2.extras
-from flask import g, jsonify, request
+from flask import g, jsonify, request, send_from_directory
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 MAX_LIMIT = 500
 DEFAULT_LIMIT = 50
@@ -75,6 +77,32 @@ _rate_limit_state = {}  # key_hash -> [timestamps of recent requests]
 # chats.py's own /api/tables/<table_name> route, which validates against
 # information_schema before ever using a name in a query.
 TABLES = ("assignments", "graded_examples", "submissions", "grading_attempts")
+
+# Swagger UI's JS/CSS loaded from jsdelivr, not installed as a Python
+# package - this app has no templating engine, so the page is just a plain
+# string constant, same pattern chats.py already uses for GREETING_TEXT/
+# BASE_CLAUDE_MD. "@5" (not an exact pinned patch version) always resolves
+# to the latest 5.x release, since this session's sandbox network policy
+# blocks both jsdelivr and cdnjs, making it impossible to verify one exact
+# version actually exists from here - confirm this page actually renders
+# in a real browser once deployed.
+DOCS_HTML = """<!doctype html>
+<html>
+<head>
+  <title>External API docs</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = () => SwaggerUIBundle({
+      url: "/api/v1/external/openapi.yaml",
+      dom_id: "#swagger-ui",
+    });
+  </script>
+</body>
+</html>"""
 
 
 def _get_conn():
@@ -213,3 +241,18 @@ def init_external_api(app):
     @require_api_key
     def external_grading_attempts():
         return _paginated_table_query("grading_attempts")
+
+    # Docs are deliberately public, no @require_api_key - they describe the
+    # API's shape (endpoint names, parameters, that a key is required), not
+    # actual data. Colleagues need to see how to use the API before they
+    # have a key to test with, and hiding "here's how our API works" isn't
+    # a meaningful security boundary anyway (this is the exact thing OWASP
+    # API Security's API9, undocumented/forgotten APIs, argues should be
+    # avoided - not something to hide).
+    @app.get("/api/v1/external/openapi.yaml")
+    def external_openapi_spec():
+        return send_from_directory(BASE_DIR, "openapi.yaml", mimetype="application/yaml")
+
+    @app.get("/api/v1/external/docs")
+    def external_docs():
+        return DOCS_HTML

@@ -1,0 +1,200 @@
+openapi: 3.0.3
+info:
+  title: remote_claude External Read-Only API
+  version: "1.0"
+  description: >
+    Read-only access to the grading database (assignments, graded examples,
+    submissions, grading attempts) for colleagues outside the chat app.
+    Every endpoint requires a personal API key - contact the app owner to
+    get one. Requests are rate-limited to 30/minute per key.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/external/assignments:
+    get:
+      summary: List assignments (rubrics)
+      parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        "200":
+          description: A page of assignments, newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      rows:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Assignment'
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "429": { $ref: '#/components/responses/RateLimited' }
+
+  /api/v1/external/graded_examples:
+    get:
+      summary: List graded examples used for grading calibration
+      parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        "200":
+          description: A page of graded examples, newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      rows:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/GradedExample'
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "429": { $ref: '#/components/responses/RateLimited' }
+
+  /api/v1/external/submissions:
+    get:
+      summary: List student submissions (contains student names and raw submission text)
+      parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        "200":
+          description: A page of submissions, newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      rows:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Submission'
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "429": { $ref: '#/components/responses/RateLimited' }
+
+  /api/v1/external/grading_attempts:
+    get:
+      summary: List grading attempts (AI grades, reasoning, approval/feedback history)
+      parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        "200":
+          description: A page of grading attempts, newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PagedResponse'
+                  - type: object
+                    properties:
+                      rows:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/GradingAttempt'
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "429": { $ref: '#/components/responses/RateLimited' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Your personal API key, issued by the app owner.
+
+  parameters:
+    limit:
+      name: limit
+      in: query
+      description: Max rows to return. Defaults to 50, capped at 500 regardless of what's requested.
+      schema: { type: integer, default: 50, maximum: 500 }
+    offset:
+      name: offset
+      in: query
+      description: Rows to skip, for paging through results.
+      schema: { type: integer, default: 0, minimum: 0 }
+
+  responses:
+    BadRequest:
+      description: limit/offset were not valid integers.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing, invalid, or revoked API key.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: More than 30 requests/minute with this key.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+    PagedResponse:
+      type: object
+      properties:
+        limit: { type: integer }
+        offset: { type: integer }
+        rows: { type: array, items: {} }
+
+    Assignment:
+      type: object
+      properties:
+        assignment_id: { type: string, format: uuid }
+        instructor_username: { type: string }
+        title: { type: string }
+        rubric: { type: string }
+        created_at: { type: string, format: date-time }
+
+    GradedExample:
+      type: object
+      properties:
+        example_id: { type: string, format: uuid }
+        assignment_id: { type: string, format: uuid }
+        student_work: { type: string }
+        grade: { type: string }
+        reasoning: { type: string }
+        created_at: { type: string, format: date-time }
+
+    Submission:
+      type: object
+      description: Contains real student names and submission text.
+      properties:
+        submission_id: { type: string, format: uuid }
+        assignment_id: { type: string, format: uuid }
+        student_name: { type: string }
+        submission_text: { type: string }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+
+    GradingAttempt:
+      type: object
+      properties:
+        attempt_id: { type: string, format: uuid }
+        submission_id: { type: string, format: uuid }
+        attempt_number: { type: integer }
+        ai_grade: { type: string }
+        ai_reasoning: { type: string }
+        instructor_feedback: { type: string }
+        approved: { type: boolean }
+        created_at: { type: string, format: date-time }
