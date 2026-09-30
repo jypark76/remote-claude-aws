@@ -65,6 +65,12 @@ jobs:
       - name: Install eval suite dependencies
         run: pip install -r eval/requirements.txt
 
+      - name: Configure AWS CLI "terraform" profile for eval suite
+        run: |
+          aws configure set aws_access_key_id "${{ secrets.AWS_ACCESS_KEY_ID }}" --profile terraform
+          aws configure set aws_secret_access_key "${{ secrets.AWS_SECRET_ACCESS_KEY }}" --profile terraform
+          aws configure set region us-east-2 --profile terraform
+
       - name: Run eval + API security gate
         id: gate
         env:
