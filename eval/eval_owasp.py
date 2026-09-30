@@ -46,6 +46,7 @@ import asyncio
 import json
 import os
 import subprocess
+import sys
 import time
 import urllib.request
 import urllib.error
@@ -755,6 +756,13 @@ def main():
     print(f"RESULT: {passed}/{len(results)} passed\n")
     for cid, cat, ok, why in results:
         print(f"[{'PASS' if ok else 'FAIL'}] {cid:35s} {cat}")
+
+    # In plain English: this is what actually makes a CI pipeline able to
+    # block a merge. Printing PASS/FAIL text means nothing to a machine -
+    # only the process's exit code does. Without this, the script always
+    # "succeeds" from CI's point of view no matter how many checks failed.
+    if passed != len(results):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

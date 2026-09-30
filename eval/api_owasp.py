@@ -36,6 +36,7 @@ That leaves API2, API4, API6, API8, API9 - the five actually tested below.
 import json
 import os
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 
@@ -238,6 +239,11 @@ def main():
     print(f"RESULT: {passed}/{len(results)} passed\n")
     for case_id, category, ok, why in results:
         print(f"[{'PASS' if ok else 'FAIL'}] {case_id:30s} {category}")
+
+    # In plain English: same reasoning as eval_owasp.py - only the exit code
+    # tells a CI pipeline pass/fail, not the printed text.
+    if passed != len(results):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
