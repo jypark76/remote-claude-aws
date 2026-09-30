@@ -14,6 +14,8 @@ local, gitignored eval/.env file to actually run:
 
     EVAL_EXTERNAL_API_KEY=<a raw, already-working api_keys.key_hash value>
     EVAL_SSH_KEY=<local path to the EC2 private key, e.g. C:\\Users\\you\\.ssh\\remote-claude-aws-key.pem>
+    EVAL_SSH_HOST_1=<e.g. ec2-user@3.144.220.140>
+    EVAL_SSH_HOST_2=<e.g. ec2-user@18.221.179.154 - the SECOND live box>
 
 CATEGORIES INTENTIONALLY NOT TESTED, WITH WHY:
   API1 (Broken Object Level Authorization) - not applicable. This isn't a
@@ -62,17 +64,30 @@ if os.path.exists(_ENV_PATH):
 BASE_URL = "https://d1qjlzxncy7kb2.cloudfront.net"
 # No hardcoded default on purpose - see eval_owasp.py's comment on this.
 SSH_KEY = os.environ["EVAL_SSH_KEY"]
-SSH_HOST = os.environ.get("EVAL_SSH_HOST", "ec2-user@3.144.220.140")
-SSH = ["ssh", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no", SSH_HOST]
+# Both live boxes, not just one - same reasoning as eval_owasp.py's
+# SSH_HOSTS: the access log this feeds into is per-box, so only checking one
+# would miss a box-2-only logging regression entirely.
+SSH_HOSTS = [os.environ["EVAL_SSH_HOST_1"], os.environ["EVAL_SSH_HOST_2"]]
 
 TEST_KEY = os.environ["EVAL_EXTERNAL_API_KEY"]
 
 
-def ssh_run(cmd, timeout=60):
+def ssh_run(cmd, host=None, timeout=60):
     """Runs a command over SSH on the live box - used by the one case
     (API6) that needs to look at server-side state (the access log)
-    directly, rather than just what the HTTP response says."""
-    return subprocess.run(SSH + [cmd], capture_output=True, text=True, timeout=timeout)
+    directly, rather than just what the HTTP response says.
+
+    Defaults to the first box for any caller that doesn't care which one -
+    see ssh_run_all_hosts() for checks that need to hold on every box."""
+    host = host or SSH_HOSTS[0]
+    ssh = ["ssh", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no", host]
+    return subprocess.run(ssh + [cmd], capture_output=True, text=True, timeout=timeout)
+
+
+def ssh_run_all_hosts(cmd, timeout=60):
+    """Returns a list of (host, subprocess.CompletedProcess) pairs, one per
+    box in SSH_HOSTS, in order."""
+    return [(host, ssh_run(cmd, host=host, timeout=timeout)) for host in SSH_HOSTS]
 
 
 # In plain English: a shortcut for "call one address on the external API
@@ -200,11 +215,20 @@ def check_access_is_logged():
     it's "would scraping it actually show up somewhere." Runs one known
     request, then SSHes into the box to confirm the exact outcome landed
     in ~/external_api_access.log - proves the detection mechanism is live
-    in production, not just present in source."""
+    in production, not just present in source.
+
+    The marker request goes through CloudFront's load balancer, so it lands
+    on ONE of the two boxes, not both - unlike the other multi-host checks
+    in eval_owasp.py, this one checks BOTH boxes' logs but only requires the
+    entry to show up on whichever box actually got picked, not on every box."""
     marker_status, _ = call("/api/v1/external/assignments", api_key="eval-log-marker-key")
-    r = ssh_run("tail -5 ~/external_api_access.log")
-    ok = marker_status == 401 and "outcome=invalid_key" in r.stdout
-    return ok, f"marker request: HTTP {marker_status}; log tail contains invalid_key entry: {'outcome=invalid_key' in r.stdout}"
+    per_host = []
+    for host, r in ssh_run_all_hosts("tail -5 ~/external_api_access.log"):
+        per_host.append((host, "outcome=invalid_key" in r.stdout))
+    logged_somewhere = any(found for _, found in per_host)
+    ok = marker_status == 401 and logged_somewhere
+    per_host_summary = ", ".join(f"{host}: {'found' if found else 'not found'}" for host, found in per_host)
+    return ok, f"marker request: HTTP {marker_status}; log tail per box: {per_host_summary}"
 
 
 CASES = [
