@@ -1,0 +1,52 @@
+# In plain English: once a pull request actually merges into master (or
+# anyone pushes to master directly), this makes both live EC2 boxes match
+# master's new code. By this point the safety/security gate has already
+# passed in the PR workflow, so this step doesn't re-test - it just deploys.
+name: Deploy master to EC2
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          cat >> ~/.ssh/config <<EOF
+          Host ec2-box-1
+            HostName ${{ secrets.EC2_HOST_1 }}
+            User ec2-user
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking no
+          Host ec2-box-2
+            HostName ${{ secrets.EC2_HOST_2 }}
+            User ec2-user
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking no
+          EOF
+
+      - name: Deploy master to both EC2 boxes
+        run: |
+          set -e
+          for box in ec2-box-1 ec2-box-2; do
+            echo "== Deploying master to $box =="
+            ssh "$box" "cd ~/remote-claude-aws && git fetch origin && git checkout master && git reset --hard origin/master && pip3 install -q -r ec2-server/requirements.txt && sudo systemctl restart remote-claude.service"
+          done
+
+      - name: Wait for health check on both boxes
+        run: |
+          set -e
+          for i in $(seq 1 30); do
+            if curl -sf https://d1qjlzxncy7kb2.cloudfront.net/health | grep -q '"ok": *true'; then
+              echo "Healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Health check never passed after deploy"
+          exit 1
