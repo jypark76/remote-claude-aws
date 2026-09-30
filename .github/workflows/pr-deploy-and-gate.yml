@@ -1,0 +1,98 @@
+# In plain English: whenever someone opens or updates a pull request into
+# master, this pushes that PR's code onto both live EC2 boxes, runs the full
+# safety/security test suite against them, and if anything fails, puts
+# master's old code back on both boxes automatically and blocks the merge.
+name: PR deploy and security gate
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  deploy-and-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          cat >> ~/.ssh/config <<EOF
+          Host ec2-box-1
+            HostName ${{ secrets.EC2_HOST_1 }}
+            User ec2-user
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking no
+          Host ec2-box-2
+            HostName ${{ secrets.EC2_HOST_2 }}
+            User ec2-user
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking no
+          EOF
+
+      - name: Deploy PR branch to both EC2 boxes
+        run: |
+          set -e
+          for box in ec2-box-1 ec2-box-2; do
+            echo "== Deploying ${{ github.event.pull_request.head.sha }} to $box =="
+            ssh "$box" "cd ~/remote-claude-aws && git fetch origin && git checkout ${{ github.event.pull_request.head.sha }} && pip3 install -q -r ec2-server/requirements.txt && sudo systemctl restart remote-claude.service"
+          done
+
+      - name: Wait for health check on both boxes
+        run: |
+          set -e
+          for i in $(seq 1 30); do
+            if curl -sf https://d1qjlzxncy7kb2.cloudfront.net/health | grep -q '"ok": *true'; then
+              echo "Healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Health check never passed after deploy"
+          exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install eval suite dependencies
+        run: pip install -r eval/requirements.txt
+
+      - name: Run eval + API security gate
+        id: gate
+        env:
+          EVAL_ADMIN_PASSWORD: ${{ secrets.EVAL_ADMIN_PASSWORD }}
+          EVAL_DB_SECRET_LITERAL: ${{ secrets.EVAL_DB_SECRET_LITERAL }}
+          EVAL_EXTERNAL_API_KEY: ${{ secrets.EVAL_EXTERNAL_API_KEY }}
+        run: |
+          cd eval
+          python eval_owasp.py
+          python api_owasp.py
+
+      - name: Roll back both EC2 boxes to master
+        if: failure()
+        run: |
+          for box in ec2-box-1 ec2-box-2; do
+            echo "== Rolling back $box to origin/master =="
+            ssh "$box" "cd ~/remote-claude-aws && git fetch origin && git checkout master && git reset --hard origin/master && pip3 install -q -r ec2-server/requirements.txt && sudo systemctl restart remote-claude.service"
+          done
+
+      - name: Confirm rollback health
+        if: failure()
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf https://d1qjlzxncy7kb2.cloudfront.net/health | grep -q '"ok": *true'; then
+              echo "Rollback healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Rollback health check never passed"
+          exit 1
