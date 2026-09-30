@@ -13,6 +13,7 @@ SETUP: this file is safe to commit (no secrets in it), but it needs a
 local, gitignored eval/.env file to actually run:
 
     EVAL_EXTERNAL_API_KEY=<a raw, already-working api_keys.key_hash value>
+    EVAL_SSH_KEY=<local path to the EC2 private key, e.g. C:\\Users\\you\\.ssh\\remote-claude-aws-key.pem>
 
 CATEGORIES INTENTIONALLY NOT TESTED, WITH WHY:
   API1 (Broken Object Level Authorization) - not applicable. This isn't a
@@ -59,8 +60,9 @@ if os.path.exists(_ENV_PATH):
 
 # Same live app, same CloudFront-only origin lockdown as eval_owasp.py.
 BASE_URL = "https://d1qjlzxncy7kb2.cloudfront.net"
-SSH_KEY = r"C:\Users\jypar\.ssh\remote-claude-aws-key.pem"
-SSH_HOST = "ec2-user@3.144.220.140"
+# No hardcoded default on purpose - see eval_owasp.py's comment on this.
+SSH_KEY = os.environ["EVAL_SSH_KEY"]
+SSH_HOST = os.environ.get("EVAL_SSH_HOST", "ec2-user@3.144.220.140")
 SSH = ["ssh", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no", SSH_HOST]
 
 TEST_KEY = os.environ["EVAL_EXTERNAL_API_KEY"]

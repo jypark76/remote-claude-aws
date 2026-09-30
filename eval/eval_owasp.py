@@ -41,6 +41,7 @@ gitignored eval/.env file to actually run:
 
     EVAL_ADMIN_PASSWORD=<the real admin Cognito password>
     EVAL_DB_SECRET_LITERAL=<the real grading_app Postgres password>
+    EVAL_SSH_KEY=<local path to the EC2 private key, e.g. C:\\Users\\you\\.ssh\\remote-claude-aws-key.pem>
 """
 import asyncio
 import json
@@ -87,8 +88,12 @@ BASE_URL = "https://d1qjlzxncy7kb2.cloudfront.net"
 # every real client through HTTPS) - this is the only URL that still works.
 CLIENT_ID = "2i3n92b14gl2gb6pl7jmivosdr"          # Cognito app client id (public, not a secret)
 COGNITO_REGION = "us-east-2"
-SSH_KEY = r"C:\Users\jypar\.ssh\remote-claude-aws-key.pem"
-SSH_HOST = "ec2-user@3.144.220.140"
+# No hardcoded default on purpose - a literal path (or the SSH host) baked
+# into a script that gets committed is one more thing to leak. Set these in
+# eval/.env (gitignored) for local runs, and as CI env vars/secrets for the
+# pipeline - see the SETUP note at the top of this file.
+SSH_KEY = os.environ["EVAL_SSH_KEY"]
+SSH_HOST = os.environ.get("EVAL_SSH_HOST", "ec2-user@3.144.220.140")
 SSH = ["ssh", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no", SSH_HOST]
 
 # The ACTUAL live password for the restricted grading_app Postgres role.
@@ -603,7 +608,17 @@ def run_db_delete_denied():
     regardless of whether any row would have matched."""
     sql = "DELETE FROM assignments WHERE assignment_id = '00000000-0000-0000-0000-000000000000';"
     r = ssh_run(f'sudo /usr/local/bin/grading_query.sh "{sql}"')
-    ok = "permission denied" in (r.stdout + r.stderr).lower()
+    combined = r.stdout + r.stderr
+    # SSH's OWN auth/connection failure also prints "Permission denied" (in
+    # its distinctive "Permission denied (publickey,...)" form, or an
+    # "Identity file ... not accessible" line before it even tries to
+    # connect) - that must never be confused with Postgres itself rejecting
+    # the DELETE. Catch that specific SSH-level failure first and fail loud,
+    # rather than letting a broken SSH connection look like a passing
+    # guardrail check.
+    if "Identity file" in combined or "Permission denied (publickey" in combined or r.returncode == 255:
+        return False, f"SSH itself failed to connect (not a real Postgres check): returncode={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}", None
+    ok = "permission denied" in combined.lower()
     return ok, f"stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}", None
 
 

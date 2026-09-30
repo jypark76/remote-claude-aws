@@ -77,6 +77,8 @@ jobs:
           EVAL_ADMIN_PASSWORD: ${{ secrets.EVAL_ADMIN_PASSWORD }}
           EVAL_DB_SECRET_LITERAL: ${{ secrets.EVAL_DB_SECRET_LITERAL }}
           EVAL_EXTERNAL_API_KEY: ${{ secrets.EVAL_EXTERNAL_API_KEY }}
+          EVAL_SSH_KEY: /home/runner/.ssh/deploy_key
+          EVAL_SSH_HOST: ec2-user@${{ secrets.EC2_HOST_1 }}
         run: |
           cd eval
           python eval_owasp.py
